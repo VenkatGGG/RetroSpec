@@ -4,6 +4,7 @@ import "time"
 
 type Session struct {
 	ID              string      `json:"id"`
+	ProjectID       string      `json:"projectId"`
 	Site            string      `json:"site"`
 	Route           string      `json:"route"`
 	StartedAt       time.Time   `json:"startedAt"`
@@ -24,6 +25,7 @@ type ErrorMark struct {
 }
 
 type IssueCluster struct {
+	ProjectID               string    `json:"projectId"`
 	Key                     string    `json:"key"`
 	Symptom                 string    `json:"symptom"`
 	SessionCount            int       `json:"sessionCount"`
@@ -58,6 +60,13 @@ type ErrorMarkerInput struct {
 
 type PromoteResult struct {
 	Promoted []IssueCluster `json:"promoted"`
+}
+
+type Project struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Site      string    `json:"site"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type CleanupResult struct {

@@ -30,6 +30,14 @@ type Handler struct {
 	sessionRetentionDays     int
 }
 
+type requestContextKey string
+
+const (
+	defaultProjectID        = "proj_default"
+	projectIDContextKey     = requestContextKey("project_id")
+	keyAuthenticatedContext = requestContextKey("key_authenticated")
+)
+
 func NewHandler(
 	store *store.Postgres,
 	replayProducer queue.Producer,
@@ -68,13 +76,15 @@ func (h *Handler) Router() http.Handler {
 
 	r.Get("/healthz", h.healthz)
 	r.Route("/v1", func(r chi.Router) {
-		r.With(h.requireIngestAPIKey).Post("/artifacts/session-events", h.uploadSessionEvents)
-		r.With(h.requireIngestAPIKey).Post("/ingest/session", h.ingestSession)
-		r.With(h.requireIngestAPIKey).Post("/issues/promote", h.promoteIssues)
+		r.Use(h.withProjectContext)
+
+		r.With(h.requireWriteAccess).Post("/artifacts/session-events", h.uploadSessionEvents)
+		r.With(h.requireWriteAccess).Post("/ingest/session", h.ingestSession)
+		r.With(h.requireWriteAccess).Post("/issues/promote", h.promoteIssues)
 		r.Get("/issues", h.listIssues)
 		r.Get("/sessions/{sessionID}", h.getSession)
 		r.Get("/sessions/{sessionID}/events", h.getSessionEvents)
-		r.With(h.requireIngestAPIKey).Post("/maintenance/cleanup", h.cleanupExpiredData)
+		r.With(h.requireWriteAccess).Post("/maintenance/cleanup", h.cleanupExpiredData)
 	})
 
 	return r
@@ -95,7 +105,8 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stored, err := h.store.Ingest(r.Context(), payload)
+	projectID := h.projectIDFromContext(r.Context())
+	stored, err := h.store.Ingest(r.Context(), projectID, payload)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest failed"})
 		return
@@ -138,9 +149,10 @@ func (h *Handler) uploadSessionEvents(w http.ResponseWriter, r *http.Request) {
 		sessionID = uuid.NewString()
 	}
 
+	projectID := h.projectIDFromContext(r.Context())
 	siteKey := slugSite(payload.Site)
 	objectKey := time.Now().UTC().Format("2006/01/02")
-	objectKey = "session-events/" + objectKey + "/" + siteKey + "/" + sessionID + ".json"
+	objectKey = "session-events/" + projectID + "/" + objectKey + "/" + siteKey + "/" + sessionID + ".json"
 
 	if err := h.artifactStore.StoreJSON(r.Context(), objectKey, payload.Events); err != nil {
 		if errors.Is(err, artifacts.ErrNotConfigured) {
@@ -152,13 +164,15 @@ func (h *Handler) uploadSessionEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
+		"projectId":       projectID,
 		"sessionId":       sessionID,
 		"eventsObjectKey": objectKey,
 	})
 }
 
 func (h *Handler) promoteIssues(w http.ResponseWriter, r *http.Request) {
-	result, err := h.store.PromoteClusters(r.Context(), h.clusterPromoteMinSession)
+	projectID := h.projectIDFromContext(r.Context())
+	result, err := h.store.PromoteClusters(r.Context(), projectID, h.clusterPromoteMinSession)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "promote failed"})
 		return
@@ -168,7 +182,8 @@ func (h *Handler) promoteIssues(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
-	clusters, err := h.store.ListIssueClusters(r.Context())
+	projectID := h.projectIDFromContext(r.Context())
+	clusters, err := h.store.ListIssueClusters(r.Context(), projectID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
 		return
@@ -178,7 +193,8 @@ func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) cleanupExpiredData(w http.ResponseWriter, r *http.Request) {
-	result, err := h.store.CleanupExpiredData(r.Context(), h.sessionRetentionDays)
+	projectID := h.projectIDFromContext(r.Context())
+	result, err := h.store.CleanupExpiredData(r.Context(), projectID, h.sessionRetentionDays)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cleanup failed"})
 		return
@@ -197,7 +213,7 @@ func (h *Handler) cleanupExpiredData(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
-	session, err := h.loadSession(r.Context(), sessionID)
+	session, err := h.loadSession(r.Context(), h.projectIDFromContext(r.Context()), sessionID)
 	if err != nil {
 		writeLookupError(w, err)
 		return
@@ -208,7 +224,7 @@ func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getSessionEvents(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
-	session, err := h.loadSession(r.Context(), sessionID)
+	session, err := h.loadSession(r.Context(), h.projectIDFromContext(r.Context()), sessionID)
 	if err != nil {
 		writeLookupError(w, err)
 		return
@@ -242,8 +258,8 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-func (h *Handler) loadSession(ctx context.Context, sessionID string) (store.Session, error) {
-	return h.store.GetSession(ctx, sessionID)
+func (h *Handler) loadSession(ctx context.Context, projectID, sessionID string) (store.Session, error) {
+	return h.store.GetSession(ctx, projectID, sessionID)
 }
 
 func writeLookupError(w http.ResponseWriter, err error) {
@@ -289,21 +305,60 @@ func strongerTrigger(current, candidate string) string {
 	return current
 }
 
-func (h *Handler) requireIngestAPIKey(next http.Handler) http.Handler {
+func (h *Handler) withProjectContext(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		provided := r.Header.Get("X-Retrospec-Key")
+		projectID := defaultProjectID
+		authenticated := false
+
+		switch {
+		case strings.TrimSpace(provided) == "":
+			// anonymous read access falls back to default project.
+		case strings.TrimSpace(h.ingestAPIKey) != "" && provided == h.ingestAPIKey:
+			authenticated = true
+		default:
+			resolvedProjectID, err := h.store.ResolveProjectIDByAPIKey(r.Context(), provided)
+			if err != nil {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				return
+			}
+			projectID = resolvedProjectID
+			authenticated = true
+		}
+
+		ctx := context.WithValue(r.Context(), projectIDContextKey, projectID)
+		ctx = context.WithValue(ctx, keyAuthenticatedContext, authenticated)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (h *Handler) requireWriteAccess(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(h.ingestAPIKey) == "" {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		provided := r.Header.Get("X-Retrospec-Key")
-		if provided == h.ingestAPIKey {
+		if h.keyAuthenticatedFromContext(r.Context()) {
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 	})
+}
+
+func (h *Handler) projectIDFromContext(ctx context.Context) string {
+	value, ok := ctx.Value(projectIDContextKey).(string)
+	if !ok || strings.TrimSpace(value) == "" {
+		return defaultProjectID
+	}
+	return value
+}
+
+func (h *Handler) keyAuthenticatedFromContext(ctx context.Context) bool {
+	value, ok := ctx.Value(keyAuthenticatedContext).(bool)
+	return ok && value
 }
 
 func slugSite(site string) string {

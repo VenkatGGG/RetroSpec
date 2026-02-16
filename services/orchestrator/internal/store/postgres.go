@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -39,12 +42,14 @@ func (p *Postgres) Health(ctx context.Context) error {
 	return p.pool.Ping(ctx)
 }
 
-func (p *Postgres) Ingest(ctx context.Context, payload IngestPayload) (Session, error) {
+func (p *Postgres) Ingest(ctx context.Context, projectID string, payload IngestPayload) (Session, error) {
 	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return Session{}, err
 	}
 	defer tx.Rollback(ctx)
+
+	projectID = normalizeProjectID(projectID)
 
 	sessionID := payload.Session.ID
 	if sessionID == "" {
@@ -54,16 +59,18 @@ func (p *Postgres) Ingest(ctx context.Context, payload IngestPayload) (Session, 
 	storedSession := Session{}
 	err = tx.QueryRow(
 		ctx,
-		`INSERT INTO sessions (id, site, route, started_at, duration_ms, events_object_key)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO sessions (id, project_id, site, route, started_at, duration_ms, events_object_key)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 ON CONFLICT (id) DO UPDATE
-		 SET site = EXCLUDED.site,
+		 SET project_id = EXCLUDED.project_id,
+		     site = EXCLUDED.site,
 		     route = EXCLUDED.route,
 		     started_at = EXCLUDED.started_at,
 		     duration_ms = EXCLUDED.duration_ms,
 		     events_object_key = EXCLUDED.events_object_key
-		 RETURNING id, site, route, started_at, duration_ms, events_object_key, created_at`,
+		 RETURNING id, project_id, site, route, started_at, duration_ms, events_object_key, created_at`,
 		sessionID,
+		projectID,
 		payload.Session.Site,
 		payload.Session.Route,
 		payload.Session.StartedAt,
@@ -71,6 +78,7 @@ func (p *Postgres) Ingest(ctx context.Context, payload IngestPayload) (Session, 
 		payload.Session.EventsObjectKey,
 	).Scan(
 		&storedSession.ID,
+		&storedSession.ProjectID,
 		&storedSession.Site,
 		&storedSession.Route,
 		&storedSession.StartedAt,
@@ -130,28 +138,33 @@ func (p *Postgres) Ingest(ctx context.Context, payload IngestPayload) (Session, 
 	return storedSession, nil
 }
 
-func (p *Postgres) PromoteClusters(ctx context.Context, minSessions int) (PromoteResult, error) {
+func (p *Postgres) PromoteClusters(ctx context.Context, projectID string, minSessions int) (PromoteResult, error) {
 	if minSessions < 1 {
 		return PromoteResult{}, fmt.Errorf("minSessions must be >= 1")
 	}
+	projectID = normalizeProjectID(projectID)
 
 	rows, err := p.pool.Query(
 		ctx,
 		`WITH ranked AS (
 		    SELECT
-		      cluster_key,
-		      session_id,
-		      label,
-		      observed_at,
+		      s.project_id,
+		      em.cluster_key,
+		      em.session_id,
+		      em.label,
+		      em.observed_at,
 		      ROW_NUMBER() OVER (
-		        PARTITION BY cluster_key
-		        ORDER BY observed_at DESC, session_id
+		        PARTITION BY s.project_id, em.cluster_key
+		        ORDER BY em.observed_at DESC, em.session_id
 		      ) AS marker_rank
-		    FROM error_markers
-		    WHERE cluster_key <> ''
+		    FROM error_markers em
+		    JOIN sessions s ON s.id = em.session_id
+		    WHERE em.cluster_key <> ''
+		      AND s.project_id = $1
 		),
 		grouped AS (
 		    SELECT
+		      project_id,
 		      cluster_key,
 		      MAX(label) AS symptom,
 		      COUNT(DISTINCT session_id) AS session_count,
@@ -162,6 +175,7 @@ func (p *Postgres) PromoteClusters(ctx context.Context, minSessions int) (Promot
 		    GROUP BY cluster_key
 		)
 		INSERT INTO issue_clusters (
+		  project_id,
 		  key,
 		  symptom,
 		  session_count,
@@ -171,23 +185,25 @@ func (p *Postgres) PromoteClusters(ctx context.Context, minSessions int) (Promot
 		  last_seen_at
 		)
 		SELECT
+		  g.project_id,
 		  g.cluster_key,
 		  g.symptom,
 		  g.session_count,
 		  g.user_count,
 		  COALESCE(g.representative_session_id, ''),
-		  LEAST(1.0, g.session_count::float / ($1::float + 1.0)) AS confidence,
+		  LEAST(1.0, g.session_count::float / ($2::float + 1.0)) AS confidence,
 		  g.last_seen_at
 		FROM grouped g
-		WHERE g.session_count >= $1
-		ON CONFLICT (key) DO UPDATE
+		WHERE g.session_count >= $2
+		ON CONFLICT (project_id, key) DO UPDATE
 		SET symptom = EXCLUDED.symptom,
 		    session_count = EXCLUDED.session_count,
 		    user_count = EXCLUDED.user_count,
 		    representative_session_id = EXCLUDED.representative_session_id,
 		    confidence = EXCLUDED.confidence,
 		    last_seen_at = EXCLUDED.last_seen_at
-		RETURNING key, symptom, session_count, user_count, representative_session_id, confidence, last_seen_at, created_at`,
+		RETURNING project_id, key, symptom, session_count, user_count, representative_session_id, confidence, last_seen_at, created_at`,
+		projectID,
 		minSessions,
 	)
 	if err != nil {
@@ -199,6 +215,7 @@ func (p *Postgres) PromoteClusters(ctx context.Context, minSessions int) (Promot
 	for rows.Next() {
 		var cluster IssueCluster
 		if err := rows.Scan(
+			&cluster.ProjectID,
 			&cluster.Key,
 			&cluster.Symptom,
 			&cluster.SessionCount,
@@ -220,12 +237,16 @@ func (p *Postgres) PromoteClusters(ctx context.Context, minSessions int) (Promot
 	return result, nil
 }
 
-func (p *Postgres) ListIssueClusters(ctx context.Context) ([]IssueCluster, error) {
+func (p *Postgres) ListIssueClusters(ctx context.Context, projectID string) ([]IssueCluster, error) {
+	projectID = normalizeProjectID(projectID)
+
 	rows, err := p.pool.Query(
 		ctx,
-		`SELECT key, symptom, session_count, user_count, representative_session_id, confidence, last_seen_at, created_at
+		`SELECT project_id, key, symptom, session_count, user_count, representative_session_id, confidence, last_seen_at, created_at
 		 FROM issue_clusters
+		 WHERE project_id = $1
 		 ORDER BY last_seen_at DESC`,
+		projectID,
 	)
 	if err != nil {
 		return nil, err
@@ -236,6 +257,7 @@ func (p *Postgres) ListIssueClusters(ctx context.Context) ([]IssueCluster, error
 	for rows.Next() {
 		var cluster IssueCluster
 		if err := rows.Scan(
+			&cluster.ProjectID,
 			&cluster.Key,
 			&cluster.Symptom,
 			&cluster.SessionCount,
@@ -257,16 +279,21 @@ func (p *Postgres) ListIssueClusters(ctx context.Context) ([]IssueCluster, error
 	return clusters, nil
 }
 
-func (p *Postgres) GetSession(ctx context.Context, id string) (Session, error) {
+func (p *Postgres) GetSession(ctx context.Context, projectID, id string) (Session, error) {
+	projectID = normalizeProjectID(projectID)
+
 	session := Session{}
 	err := p.pool.QueryRow(
 		ctx,
-		`SELECT id, site, route, started_at, duration_ms, events_object_key, created_at
+		`SELECT id, project_id, site, route, started_at, duration_ms, events_object_key, created_at
 		 FROM sessions
-		 WHERE id = $1`,
+		 WHERE id = $1
+		   AND project_id = $2`,
 		id,
+		projectID,
 	).Scan(
 		&session.ID,
+		&session.ProjectID,
 		&session.Site,
 		&session.Route,
 		&session.StartedAt,
@@ -315,10 +342,11 @@ func (p *Postgres) GetSession(ctx context.Context, id string) (Session, error) {
 	return session, nil
 }
 
-func (p *Postgres) CleanupExpiredData(ctx context.Context, retentionDays int) (CleanupResult, error) {
+func (p *Postgres) CleanupExpiredData(ctx context.Context, projectID string, retentionDays int) (CleanupResult, error) {
 	if retentionDays < 1 {
 		return CleanupResult{}, fmt.Errorf("retentionDays must be >= 1")
 	}
+	projectID = normalizeProjectID(projectID)
 
 	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -335,10 +363,12 @@ func (p *Postgres) CleanupExpiredData(ctx context.Context, retentionDays int) (C
 		`WITH deleted AS (
 		   DELETE FROM sessions
 		   WHERE created_at < NOW() - ($1::text || ' days')::interval
+		     AND project_id = $2
 		   RETURNING events_object_key
 		 )
 		 SELECT COUNT(*), COALESCE(array_agg(events_object_key), '{}'::text[]) FROM deleted`,
 		retentionDays,
+		projectID,
 	).Scan(&deletedSessions, &deletedEventObject)
 	if err != nil {
 		return CleanupResult{}, err
@@ -347,11 +377,15 @@ func (p *Postgres) CleanupExpiredData(ctx context.Context, retentionDays int) (C
 	commandTag, err := tx.Exec(
 		ctx,
 		`DELETE FROM issue_clusters ic
-		 WHERE NOT EXISTS (
+		 WHERE ic.project_id = $1
+		   AND NOT EXISTS (
 		   SELECT 1
 		   FROM error_markers em
+		   JOIN sessions s ON s.id = em.session_id
 		   WHERE em.cluster_key = ic.key
+		     AND s.project_id = ic.project_id
 		 )`,
+		projectID,
 	)
 	if err != nil {
 		return CleanupResult{}, err
@@ -368,4 +402,42 @@ func (p *Postgres) CleanupExpiredData(ctx context.Context, retentionDays int) (C
 		DeletedEventObjectKeys: deletedEventObject,
 		RetentionDays:          retentionDays,
 	}, nil
+}
+
+func (p *Postgres) ResolveProjectIDByAPIKey(ctx context.Context, rawKey string) (string, error) {
+	key := strings.TrimSpace(rawKey)
+	if key == "" {
+		return "", pgx.ErrNoRows
+	}
+
+	hash := hashAPIKey(key)
+	projectID := ""
+
+	err := p.pool.QueryRow(
+		ctx,
+		`UPDATE project_api_keys
+		 SET last_used_at = NOW()
+		 WHERE key_hash = $1
+		   AND status = 'active'
+		 RETURNING project_id`,
+		hash,
+	).Scan(&projectID)
+	if err != nil {
+		return "", err
+	}
+
+	return projectID, nil
+}
+
+func hashAPIKey(rawKey string) string {
+	sum := sha256.Sum256([]byte(rawKey))
+	return hex.EncodeToString(sum[:])
+}
+
+func normalizeProjectID(projectID string) string {
+	trimmed := strings.TrimSpace(projectID)
+	if trimmed == "" {
+		return "proj_default"
+	}
+	return trimmed
 }
