@@ -326,17 +326,20 @@ func (p *Postgres) CleanupExpiredData(ctx context.Context, retentionDays int) (C
 	}
 	defer tx.Rollback(ctx)
 
-	var deletedSessions int
+	var (
+		deletedSessions    int
+		deletedEventObject []string
+	)
 	err = tx.QueryRow(
 		ctx,
 		`WITH deleted AS (
 		   DELETE FROM sessions
 		   WHERE created_at < NOW() - ($1::text || ' days')::interval
-		   RETURNING id
+		   RETURNING events_object_key
 		 )
-		 SELECT COUNT(*) FROM deleted`,
+		 SELECT COUNT(*), COALESCE(array_agg(events_object_key), '{}'::text[]) FROM deleted`,
 		retentionDays,
-	).Scan(&deletedSessions)
+	).Scan(&deletedSessions, &deletedEventObject)
 	if err != nil {
 		return CleanupResult{}, err
 	}
@@ -359,8 +362,10 @@ func (p *Postgres) CleanupExpiredData(ctx context.Context, retentionDays int) (C
 	}
 
 	return CleanupResult{
-		DeletedSessions:      deletedSessions,
-		DeletedIssueClusters: int(commandTag.RowsAffected()),
-		RetentionDays:        retentionDays,
+		DeletedSessions:        deletedSessions,
+		DeletedIssueClusters:   int(commandTag.RowsAffected()),
+		DeletedEventObjects:    len(deletedEventObject),
+		DeletedEventObjectKeys: deletedEventObject,
+		RetentionDays:          retentionDays,
 	}, nil
 }

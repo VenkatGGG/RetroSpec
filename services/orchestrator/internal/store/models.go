@@ -61,7 +61,10 @@ type PromoteResult struct {
 }
 
 type CleanupResult struct {
-	DeletedSessions      int `json:"deletedSessions"`
-	DeletedIssueClusters int `json:"deletedIssueClusters"`
-	RetentionDays        int `json:"retentionDays"`
+	DeletedSessions         int      `json:"deletedSessions"`
+	DeletedIssueClusters    int      `json:"deletedIssueClusters"`
+	DeletedEventObjects     int      `json:"deletedEventObjects"`
+	DeletedEventObjectKeys  []string `json:"-"`
+	FailedEventObjectDelete int      `json:"failedEventObjectDelete"`
+	RetentionDays           int      `json:"retentionDays"`
 }

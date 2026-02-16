@@ -169,6 +169,14 @@ func (h *Handler) cleanupExpiredData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	for _, objectKey := range result.DeletedEventObjectKeys {
+		err := h.artifactStore.DeleteObject(r.Context(), objectKey)
+		if err != nil && !errors.Is(err, artifacts.ErrNotConfigured) {
+			result.FailedEventObjectDelete++
+			log.Printf("failed to delete event object key=%s err=%v", objectKey, err)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 

@@ -82,6 +82,14 @@ func (s *S3Store) LoadJSON(ctx context.Context, objectKey string) (json.RawMessa
 	return json.RawMessage(bytes.TrimSpace(payload)), nil
 }
 
+func (s *S3Store) DeleteObject(ctx context.Context, objectKey string) error {
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(objectKey),
+	})
+	return err
+}
+
 func (s *S3Store) Close() error {
 	return nil
 }
