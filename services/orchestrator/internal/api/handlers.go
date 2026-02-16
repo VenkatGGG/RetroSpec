@@ -25,6 +25,7 @@ type Handler struct {
 	replayProducer           queue.Producer
 	corsAllowedOrigins       []string
 	adminAPIKey              string
+	internalAPIKey           string
 	ingestAPIKey             string
 	store                    *store.Postgres
 	clusterPromoteMinSession int
@@ -45,6 +46,7 @@ func NewHandler(
 	artifactStore artifacts.Store,
 	corsAllowedOrigins []string,
 	adminAPIKey string,
+	internalAPIKey string,
 	ingestAPIKey string,
 	clusterPromoteMinSession int,
 	sessionRetentionDays int,
@@ -55,6 +57,7 @@ func NewHandler(
 		artifactStore:            artifactStore,
 		corsAllowedOrigins:       corsAllowedOrigins,
 		adminAPIKey:              adminAPIKey,
+		internalAPIKey:           internalAPIKey,
 		ingestAPIKey:             ingestAPIKey,
 		clusterPromoteMinSession: clusterPromoteMinSession,
 		sessionRetentionDays:     sessionRetentionDays,
@@ -71,7 +74,7 @@ func (h *Handler) Router() http.Handler {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   h.corsAllowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Retrospec-Key", "X-Retrospec-Admin", "X-Retrospec-Internal"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: false,
 		MaxAge:           300,
@@ -85,6 +88,7 @@ func (h *Handler) Router() http.Handler {
 			r.With(h.requireAdminAccess).Get("/projects/{projectID}/keys", h.listProjectAPIKeys)
 			r.With(h.requireAdminAccess).Post("/projects/{projectID}/keys", h.createProjectAPIKey)
 		})
+		r.With(h.requireInternalAccess).Post("/internal/replay-results", h.reportReplayResult)
 
 		r.Group(func(r chi.Router) {
 			r.Use(h.withProjectContext)
@@ -196,6 +200,17 @@ type createProjectAPIKeyRequest struct {
 	Label string `json:"label"`
 }
 
+type reportReplayResultRequest struct {
+	ProjectID    string                 `json:"projectId"`
+	SessionID    string                 `json:"sessionId"`
+	ArtifactType string                 `json:"artifactType"`
+	ArtifactKey  string                 `json:"artifactKey"`
+	TriggerKind  string                 `json:"triggerKind"`
+	Status       string                 `json:"status"`
+	GeneratedAt  string                 `json:"generatedAt"`
+	Windows      []store.ArtifactWindow `json:"windows"`
+}
+
 func (h *Handler) listProjectAPIKeys(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	keys, err := h.store.ListProjectAPIKeys(r.Context(), projectID)
@@ -232,6 +247,57 @@ func (h *Handler) createProjectAPIKey(w http.ResponseWriter, r *http.Request) {
 		"projectId": stored.ProjectID,
 		"label":     stored.Label,
 		"apiKey":    rawKey,
+	})
+}
+
+func (h *Handler) reportReplayResult(w http.ResponseWriter, r *http.Request) {
+	payload := reportReplayResultRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	projectID := strings.TrimSpace(payload.ProjectID)
+	sessionID := strings.TrimSpace(payload.SessionID)
+	artifactKey := strings.TrimSpace(payload.ArtifactKey)
+	if projectID == "" || sessionID == "" || artifactKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "projectId, sessionId, and artifactKey are required"})
+		return
+	}
+
+	if _, err := h.loadSession(r.Context(), projectID, sessionID); err != nil {
+		writeLookupError(w, err)
+		return
+	}
+
+	generatedAt := time.Now().UTC()
+	if candidate := strings.TrimSpace(payload.GeneratedAt); candidate != "" {
+		parsedTime, err := time.Parse(time.RFC3339Nano, candidate)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "generatedAt must be RFC3339 timestamp"})
+			return
+		}
+		generatedAt = parsedTime
+	}
+
+	artifact, err := h.store.UpsertSessionArtifact(
+		r.Context(),
+		projectID,
+		payload.ArtifactType,
+		sessionID,
+		artifactKey,
+		payload.TriggerKind,
+		payload.Status,
+		payload.Windows,
+		generatedAt,
+	)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "artifact upsert failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"artifact": artifact,
 	})
 }
 
@@ -387,6 +453,7 @@ func buildReplayJob(session store.Session) (queue.ReplayJob, bool) {
 	}
 
 	return queue.ReplayJob{
+		ProjectID:       session.ProjectID,
 		SessionID:       session.ID,
 		EventsObjectKey: session.EventsObjectKey,
 		MarkerOffsetsMs: offsets,
@@ -443,6 +510,23 @@ func (h *Handler) requireWriteAccess(next http.Handler) http.Handler {
 		}
 
 		if h.keyAuthenticatedFromContext(r.Context()) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	})
+}
+
+func (h *Handler) requireInternalAccess(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.TrimSpace(h.internalAPIKey) == "" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "internal endpoints disabled"})
+			return
+		}
+
+		provided := strings.TrimSpace(r.Header.Get("X-Retrospec-Internal"))
+		if provided == h.internalAPIKey {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -339,6 +340,57 @@ func (p *Postgres) GetSession(ctx context.Context, projectID, id string) (Sessio
 		return Session{}, rows.Err()
 	}
 
+	artifactRows, err := p.pool.Query(
+		ctx,
+		`SELECT id, project_id, session_id, artifact_type, artifact_key, trigger_kind, status, marker_windows, generated_at, created_at, updated_at
+		 FROM session_artifacts
+		 WHERE project_id = $1
+		   AND session_id = $2
+		 ORDER BY generated_at DESC`,
+		projectID,
+		id,
+	)
+	if err != nil {
+		return Session{}, err
+	}
+	defer artifactRows.Close()
+
+	session.Artifacts = make([]SessionArtifact, 0)
+	for artifactRows.Next() {
+		var (
+			artifact    SessionArtifact
+			windowsJSON []byte
+		)
+		if err := artifactRows.Scan(
+			&artifact.ID,
+			&artifact.ProjectID,
+			&artifact.SessionID,
+			&artifact.ArtifactType,
+			&artifact.ArtifactKey,
+			&artifact.TriggerKind,
+			&artifact.Status,
+			&windowsJSON,
+			&artifact.GeneratedAt,
+			&artifact.CreatedAt,
+			&artifact.UpdatedAt,
+		); err != nil {
+			return Session{}, err
+		}
+
+		artifact.Windows = make([]ArtifactWindow, 0)
+		if len(windowsJSON) > 0 {
+			if err := json.Unmarshal(windowsJSON, &artifact.Windows); err != nil {
+				return Session{}, err
+			}
+		}
+
+		session.Artifacts = append(session.Artifacts, artifact)
+	}
+
+	if artifactRows.Err() != nil {
+		return Session{}, artifactRows.Err()
+	}
+
 	return session, nil
 }
 
@@ -577,6 +629,102 @@ func (p *Postgres) ListProjectAPIKeys(ctx context.Context, projectID string) ([]
 	}
 
 	return keys, nil
+}
+
+func (p *Postgres) UpsertSessionArtifact(
+	ctx context.Context,
+	projectID string,
+	artifactType string,
+	sessionID string,
+	artifactKey string,
+	triggerKind string,
+	status string,
+	windows []ArtifactWindow,
+	generatedAt time.Time,
+) (SessionArtifact, error) {
+	projectID = normalizeProjectID(projectID)
+	sessionID = strings.TrimSpace(sessionID)
+	artifactKey = strings.TrimSpace(artifactKey)
+	if sessionID == "" {
+		return SessionArtifact{}, fmt.Errorf("sessionID is required")
+	}
+	if artifactKey == "" {
+		return SessionArtifact{}, fmt.Errorf("artifactKey is required")
+	}
+
+	artifactType = strings.TrimSpace(artifactType)
+	if artifactType == "" {
+		artifactType = "analysis_json"
+	}
+
+	triggerKind = strings.TrimSpace(triggerKind)
+	if triggerKind == "" {
+		triggerKind = "ui_no_effect"
+	}
+
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = "ready"
+	}
+	if generatedAt.IsZero() {
+		generatedAt = time.Now().UTC()
+	}
+
+	windowsJSON, err := json.Marshal(windows)
+	if err != nil {
+		return SessionArtifact{}, err
+	}
+
+	artifactID := "art_" + uuid.NewString()
+	stored := SessionArtifact{}
+	scanErr := p.pool.QueryRow(
+		ctx,
+		`INSERT INTO session_artifacts (
+		   id, project_id, session_id, artifact_type, artifact_key, trigger_kind, status, marker_windows, generated_at
+		 )
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+		 ON CONFLICT (project_id, session_id, artifact_type) DO UPDATE
+		 SET artifact_key = EXCLUDED.artifact_key,
+		     trigger_kind = EXCLUDED.trigger_kind,
+		     status = EXCLUDED.status,
+		     marker_windows = EXCLUDED.marker_windows,
+		     generated_at = EXCLUDED.generated_at,
+		     updated_at = NOW()
+		 RETURNING id, project_id, session_id, artifact_type, artifact_key, trigger_kind, status, marker_windows, generated_at, created_at, updated_at`,
+		artifactID,
+		projectID,
+		sessionID,
+		artifactType,
+		artifactKey,
+		triggerKind,
+		status,
+		string(windowsJSON),
+		generatedAt,
+	).Scan(
+		&stored.ID,
+		&stored.ProjectID,
+		&stored.SessionID,
+		&stored.ArtifactType,
+		&stored.ArtifactKey,
+		&stored.TriggerKind,
+		&stored.Status,
+		&windowsJSON,
+		&stored.GeneratedAt,
+		&stored.CreatedAt,
+		&stored.UpdatedAt,
+	)
+	if scanErr != nil {
+		return SessionArtifact{}, scanErr
+	}
+
+	stored.Windows = make([]ArtifactWindow, 0)
+	if len(windowsJSON) > 0 {
+		if err := json.Unmarshal(windowsJSON, &stored.Windows); err != nil {
+			return SessionArtifact{}, err
+		}
+	}
+
+	return stored, nil
 }
 
 func hashAPIKey(rawKey string) string {

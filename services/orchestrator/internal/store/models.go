@@ -3,15 +3,16 @@ package store
 import "time"
 
 type Session struct {
-	ID              string      `json:"id"`
-	ProjectID       string      `json:"projectId"`
-	Site            string      `json:"site"`
-	Route           string      `json:"route"`
-	StartedAt       time.Time   `json:"startedAt"`
-	DurationMs      int         `json:"durationMs"`
-	EventsObjectKey string      `json:"eventsObjectKey"`
-	CreatedAt       time.Time   `json:"createdAt"`
-	Markers         []ErrorMark `json:"markers"`
+	ID              string            `json:"id"`
+	ProjectID       string            `json:"projectId"`
+	Site            string            `json:"site"`
+	Route           string            `json:"route"`
+	StartedAt       time.Time         `json:"startedAt"`
+	DurationMs      int               `json:"durationMs"`
+	EventsObjectKey string            `json:"eventsObjectKey"`
+	CreatedAt       time.Time         `json:"createdAt"`
+	Markers         []ErrorMark       `json:"markers"`
+	Artifacts       []SessionArtifact `json:"artifacts"`
 }
 
 type ErrorMark struct {
@@ -76,6 +77,25 @@ type ProjectAPIKey struct {
 	Status     string     `json:"status"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+}
+
+type ArtifactWindow struct {
+	StartMs int `json:"startMs"`
+	EndMs   int `json:"endMs"`
+}
+
+type SessionArtifact struct {
+	ID           string           `json:"id"`
+	ProjectID    string           `json:"projectId"`
+	SessionID    string           `json:"sessionId"`
+	ArtifactType string           `json:"artifactType"`
+	ArtifactKey  string           `json:"artifactKey"`
+	TriggerKind  string           `json:"triggerKind"`
+	Status       string           `json:"status"`
+	GeneratedAt  time.Time        `json:"generatedAt"`
+	CreatedAt    time.Time        `json:"createdAt"`
+	UpdatedAt    time.Time        `json:"updatedAt"`
+	Windows      []ArtifactWindow `json:"windows"`
 }
 
 type CleanupResult struct {

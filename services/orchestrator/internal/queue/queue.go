@@ -3,6 +3,7 @@ package queue
 import "context"
 
 type ReplayJob struct {
+	ProjectID       string `json:"projectId"`
 	SessionID       string `json:"sessionId"`
 	EventsObjectKey string `json:"eventsObjectKey"`
 	MarkerOffsetsMs []int  `json:"markerOffsetsMs"`

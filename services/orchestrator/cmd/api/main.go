@@ -68,6 +68,7 @@ func main() {
 		artifactStore,
 		cfg.CORSAllowedOrigins,
 		cfg.AdminAPIKey,
+		cfg.InternalAPIKey,
 		cfg.IngestAPIKey,
 		cfg.ClusterPromoteMinSessions,
 		cfg.SessionRetentionDays,
