@@ -137,23 +137,45 @@ func (p *Postgres) PromoteClusters(ctx context.Context, minSessions int) (Promot
 
 	rows, err := p.pool.Query(
 		ctx,
-		`WITH grouped AS (
+		`WITH ranked AS (
+		    SELECT
+		      cluster_key,
+		      session_id,
+		      label,
+		      observed_at,
+		      ROW_NUMBER() OVER (
+		        PARTITION BY cluster_key
+		        ORDER BY observed_at DESC, session_id
+		      ) AS marker_rank
+		    FROM error_markers
+		    WHERE cluster_key <> ''
+		),
+		grouped AS (
 		    SELECT
 		      cluster_key,
 		      MAX(label) AS symptom,
 		      COUNT(DISTINCT session_id) AS session_count,
 		      COUNT(DISTINCT session_id) AS user_count,
-		      MAX(observed_at) AS last_seen_at
-		    FROM error_markers
-		    WHERE cluster_key <> ''
+		      MAX(observed_at) AS last_seen_at,
+		      MAX(CASE WHEN marker_rank = 1 THEN session_id END) AS representative_session_id
+		    FROM ranked
 		    GROUP BY cluster_key
 		)
-		INSERT INTO issue_clusters (key, symptom, session_count, user_count, confidence, last_seen_at)
+		INSERT INTO issue_clusters (
+		  key,
+		  symptom,
+		  session_count,
+		  user_count,
+		  representative_session_id,
+		  confidence,
+		  last_seen_at
+		)
 		SELECT
 		  g.cluster_key,
 		  g.symptom,
 		  g.session_count,
 		  g.user_count,
+		  COALESCE(g.representative_session_id, ''),
 		  LEAST(1.0, g.session_count::float / ($1::float + 1.0)) AS confidence,
 		  g.last_seen_at
 		FROM grouped g
@@ -162,9 +184,10 @@ func (p *Postgres) PromoteClusters(ctx context.Context, minSessions int) (Promot
 		SET symptom = EXCLUDED.symptom,
 		    session_count = EXCLUDED.session_count,
 		    user_count = EXCLUDED.user_count,
+		    representative_session_id = EXCLUDED.representative_session_id,
 		    confidence = EXCLUDED.confidence,
 		    last_seen_at = EXCLUDED.last_seen_at
-		RETURNING key, symptom, session_count, user_count, confidence, last_seen_at, created_at`,
+		RETURNING key, symptom, session_count, user_count, representative_session_id, confidence, last_seen_at, created_at`,
 		minSessions,
 	)
 	if err != nil {
@@ -180,6 +203,7 @@ func (p *Postgres) PromoteClusters(ctx context.Context, minSessions int) (Promot
 			&cluster.Symptom,
 			&cluster.SessionCount,
 			&cluster.UserCount,
+			&cluster.RepresentativeSessionID,
 			&cluster.Confidence,
 			&cluster.LastSeenAt,
 			&cluster.CreatedAt,
@@ -199,7 +223,7 @@ func (p *Postgres) PromoteClusters(ctx context.Context, minSessions int) (Promot
 func (p *Postgres) ListIssueClusters(ctx context.Context) ([]IssueCluster, error) {
 	rows, err := p.pool.Query(
 		ctx,
-		`SELECT key, symptom, session_count, user_count, confidence, last_seen_at, created_at
+		`SELECT key, symptom, session_count, user_count, representative_session_id, confidence, last_seen_at, created_at
 		 FROM issue_clusters
 		 ORDER BY last_seen_at DESC`,
 	)
@@ -216,6 +240,7 @@ func (p *Postgres) ListIssueClusters(ctx context.Context) ([]IssueCluster, error
 			&cluster.Symptom,
 			&cluster.SessionCount,
 			&cluster.UserCount,
+			&cluster.RepresentativeSessionID,
 			&cluster.Confidence,
 			&cluster.LastSeenAt,
 			&cluster.CreatedAt,

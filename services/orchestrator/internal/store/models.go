@@ -24,13 +24,14 @@ type ErrorMark struct {
 }
 
 type IssueCluster struct {
-	Key          string    `json:"key"`
-	Symptom      string    `json:"symptom"`
-	SessionCount int       `json:"sessionCount"`
-	UserCount    int       `json:"userCount"`
-	Confidence   float64   `json:"confidence"`
-	LastSeenAt   time.Time `json:"lastSeenAt"`
-	CreatedAt    time.Time `json:"createdAt"`
+	Key                     string    `json:"key"`
+	Symptom                 string    `json:"symptom"`
+	SessionCount            int       `json:"sessionCount"`
+	UserCount               int       `json:"userCount"`
+	RepresentativeSessionID string    `json:"representativeSessionId"`
+	Confidence              float64   `json:"confidence"`
+	LastSeenAt              time.Time `json:"lastSeenAt"`
+	CreatedAt               time.Time `json:"createdAt"`
 }
 
 type IngestPayload struct {
