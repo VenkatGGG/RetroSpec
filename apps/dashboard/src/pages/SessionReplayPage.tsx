@@ -4,11 +4,14 @@ import { useAppDispatch, useAppSelector } from "../app/hooks";
 import { selectActiveMarkerId } from "../features/sessions/selectors";
 import { setActiveMarker } from "../features/sessions/sessionSlice";
 import { ReplayCanvas } from "../components/ReplayCanvas";
-import { useGetSessionEventsQuery, useGetSessionQuery } from "../features/reporting/reportingApi";
+import {
+  useGetSessionArtifactTokenQuery,
+  useGetSessionEventsQuery,
+  useGetSessionQuery,
+} from "../features/reporting/reportingApi";
 import type { ErrorMarker } from "../features/sessions/types";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
-const ingestApiKey = import.meta.env.VITE_INGEST_API_KEY;
 
 export function SessionReplayPage() {
   const { sessionId } = useParams();
@@ -25,6 +28,23 @@ export function SessionReplayPage() {
     isLoading: isEventsLoading,
     error: eventsError,
   } = useGetSessionEventsQuery(sessionId ?? "", { skip: !sessionId });
+  const replayVideoArtifact =
+    activeSession?.artifacts.find(
+      (artifact) => artifact.artifactType === "replay_video" && artifact.status === "ready",
+    ) ?? null;
+  const {
+    data: replayVideoToken,
+    isFetching: isReplayTokenFetching,
+    isError: isReplayTokenError,
+  } = useGetSessionArtifactTokenQuery(
+    {
+      sessionId: activeSession?.id ?? "",
+      artifactType: "replay_video",
+    },
+    {
+      skip: !replayVideoArtifact,
+    },
+  );
 
   if (!activeSession) {
     return (
@@ -52,14 +72,8 @@ export function SessionReplayPage() {
     activeSession.artifacts.find((artifact) => artifact.artifactType === "analysis_json") ??
     activeSession.artifacts?.[0] ??
     null;
-  const replayVideoArtifact =
-    activeSession.artifacts.find(
-      (artifact) => artifact.artifactType === "replay_video" && artifact.status === "ready",
-    ) ?? null;
-  const replayVideoSource = replayVideoArtifact
-    ? `${apiBaseUrl}/v1/sessions/${activeSession.id}/artifacts/replay_video${
-        ingestApiKey ? `?key=${encodeURIComponent(ingestApiKey)}` : ""
-      }`
+  const replayVideoSource = replayVideoArtifact && replayVideoToken?.token
+    ? `${apiBaseUrl}/v1/sessions/${activeSession.id}/artifacts/replay_video?artifactToken=${encodeURIComponent(replayVideoToken.token)}`
     : "";
 
   return (
@@ -122,6 +136,10 @@ export function SessionReplayPage() {
             <strong>Status:</strong> {replayVideoArtifact.status} | <strong>Key:</strong>{" "}
             <code>{replayVideoArtifact.artifactKey}</code>
           </p>
+          {isReplayTokenFetching && <p className="replay-status">Preparing secure playback...</p>}
+          {isReplayTokenError && (
+            <p className="replay-status error">Unable to create playback token for this artifact.</p>
+          )}
           <video
             className="replay-video"
             src={replayVideoSource}

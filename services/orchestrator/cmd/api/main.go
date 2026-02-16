@@ -73,6 +73,8 @@ func main() {
 		cfg.ClusterPromoteMinSessions,
 		cfg.RateLimitRequestsPerSec,
 		cfg.RateLimitBurst,
+		cfg.ArtifactTokenSecret,
+		cfg.ArtifactTokenTTLSeconds,
 		cfg.SessionRetentionDays,
 	)
 	router := handler.Router()

@@ -50,6 +50,7 @@ Set `ADMIN_API_KEY` on the orchestrator to enable project/key management endpoin
 Set `VITE_ADMIN_API_KEY` in the dashboard to use `/admin` controls from the UI.
 Set `INTERNAL_API_KEY` on both orchestrator and replay worker so async replay jobs can persist artifact metadata.
 Set `ORCHESTRATOR_BASE_URL` for the replay worker callback target (default `http://localhost:8080`).
+Set `ARTIFACT_TOKEN_SECRET` to enable short-lived signed artifact playback tokens (defaults to `INTERNAL_API_KEY` if omitted).
 Set `REPLAY_RENDER_ENABLED=true` on the replay worker to render full-session `.webm` assets via Playwright.
 Replay worker retries failed jobs automatically (`REPLAY_MAX_ATTEMPTS`, `REPLAY_RETRY_BASE_MS`) before dead-lettering.
 Replay worker deduplicates repeated payloads for a TTL window (`REPLAY_DEDUPE_WINDOW_SEC`).

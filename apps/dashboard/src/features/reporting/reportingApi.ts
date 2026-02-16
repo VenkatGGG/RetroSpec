@@ -43,6 +43,17 @@ export const reportingApi = createApi({
         Array.isArray(response.events) ? response.events : [],
       providesTags: (_result, _error, sessionId) => [{ type: "Session", id: `${sessionId}:events` }],
     }),
+    getSessionArtifactToken: builder.query<
+      { token: string; expiresAt: string },
+      { sessionId: string; artifactType: string }
+    >({
+      query: ({ sessionId, artifactType }) =>
+        `/v1/sessions/${sessionId}/artifacts/${artifactType}/token`,
+      transformResponse: (response: { token: string; expiresAt: string }) => response,
+      providesTags: (_result, _error, args) => [
+        { type: "Session", id: `${args.sessionId}:${args.artifactType}:token` },
+      ],
+    }),
     promoteIssues: builder.mutation<{ promoted: IssueCluster[] }, void>({
       query: () => ({
         url: "/v1/issues/promote",
@@ -136,6 +147,7 @@ export const {
   useGetIssuesQuery,
   useGetSessionQuery,
   useGetSessionEventsQuery,
+  useGetSessionArtifactTokenQuery,
   usePromoteIssuesMutation,
   useCleanupDataMutation,
   useCreateProjectMutation,

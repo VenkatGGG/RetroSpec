@@ -15,6 +15,8 @@ type Config struct {
 	AdminAPIKey               string
 	InternalAPIKey            string
 	IngestAPIKey              string
+	ArtifactTokenSecret       string
+	ArtifactTokenTTLSeconds   int
 	RateLimitRequestsPerSec   float64
 	RateLimitBurst            int
 	SessionRetentionDays      int
@@ -38,6 +40,8 @@ func Load() Config {
 		AdminAPIKey:               os.Getenv("ADMIN_API_KEY"),
 		InternalAPIKey:            os.Getenv("INTERNAL_API_KEY"),
 		IngestAPIKey:              os.Getenv("INGEST_API_KEY"),
+		ArtifactTokenSecret:       artifactTokenSecret(),
+		ArtifactTokenTTLSeconds:   envOrDefaultInt("ARTIFACT_TOKEN_TTL_SECONDS", 300),
 		RateLimitRequestsPerSec:   envOrDefaultFloat("RATE_LIMIT_REQUESTS_PER_SEC", 25),
 		RateLimitBurst:            envOrDefaultInt("RATE_LIMIT_BURST", 50),
 		SessionRetentionDays:      envOrDefaultInt("SESSION_RETENTION_DAYS", 7),
@@ -48,6 +52,16 @@ func Load() Config {
 		S3Bucket:                  envOrDefault("S3_BUCKET", ""),
 		ClusterPromoteMinSessions: envOrDefaultInt("CLUSTER_PROMOTE_MIN_SESSIONS", 2),
 	}
+}
+
+func artifactTokenSecret() string {
+	if value := strings.TrimSpace(os.Getenv("ARTIFACT_TOKEN_SECRET")); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(os.Getenv("INTERNAL_API_KEY")); value != "" {
+		return value
+	}
+	return ""
 }
 
 func databaseURL() string {

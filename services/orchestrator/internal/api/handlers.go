@@ -31,6 +31,8 @@ type Handler struct {
 	clusterPromoteMinSession int
 	rateLimiter              *apiRateLimiter
 	metrics                  *apiMetrics
+	artifactTokenSecret      string
+	artifactTokenTTL         time.Duration
 	sessionRetentionDays     int
 }
 
@@ -53,6 +55,8 @@ func NewHandler(
 	clusterPromoteMinSession int,
 	rateLimitRequestsPerSec float64,
 	rateLimitBurst int,
+	artifactTokenSecret string,
+	artifactTokenTTLSeconds int,
 	sessionRetentionDays int,
 ) *Handler {
 	metrics := newAPIMetrics()
@@ -70,6 +74,8 @@ func NewHandler(
 			metrics.rateLimitedTotal.Add(1)
 		}),
 		metrics:              metrics,
+		artifactTokenSecret:  strings.TrimSpace(artifactTokenSecret),
+		artifactTokenTTL:     time.Duration(maxInt(60, artifactTokenTTLSeconds)) * time.Second,
 		sessionRetentionDays: sessionRetentionDays,
 	}
 }
@@ -114,6 +120,7 @@ func (h *Handler) Router() http.Handler {
 			r.Get("/issues", h.listIssues)
 			r.Get("/sessions/{sessionID}", h.getSession)
 			r.Get("/sessions/{sessionID}/events", h.getSessionEvents)
+			r.With(h.requireKeyAccess).Get("/sessions/{sessionID}/artifacts/{artifactType}/token", h.createArtifactToken)
 			r.With(h.requireWriteAccess).Post("/maintenance/cleanup", h.cleanupExpiredData)
 		})
 	})
@@ -449,6 +456,45 @@ func (h *Handler) getSessionEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) createArtifactToken(w http.ResponseWriter, r *http.Request) {
+	if !h.hasArtifactTokenSecret() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "artifact token secret not configured"})
+		return
+	}
+
+	sessionID := chi.URLParam(r, "sessionID")
+	artifactType := strings.TrimSpace(chi.URLParam(r, "artifactType"))
+	if artifactType == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "artifactType is required"})
+		return
+	}
+
+	projectID := h.projectIDFromContext(r.Context())
+	session, err := h.loadSession(r.Context(), projectID, sessionID)
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
+
+	artifact, found := findArtifactByType(session.Artifacts, artifactType)
+	if !found || strings.TrimSpace(artifact.ArtifactKey) == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
+		return
+	}
+
+	expiresAt := time.Now().UTC().Add(h.artifactTokenTTL)
+	token, err := h.signArtifactToken(projectID, sessionID, artifactType, expiresAt)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token generation failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"token":     token,
+		"expiresAt": expiresAt.Format(time.RFC3339),
+	})
+}
+
 func (h *Handler) getSessionArtifact(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
 	artifactType := strings.TrimSpace(chi.URLParam(r, "artifactType"))
@@ -457,7 +503,22 @@ func (h *Handler) getSessionArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := h.loadSession(r.Context(), h.projectIDFromContext(r.Context()), sessionID)
+	projectID := h.projectIDFromContext(r.Context())
+	artifactToken := strings.TrimSpace(r.URL.Query().Get("artifactToken"))
+	if artifactToken != "" {
+		claims, err := h.verifyArtifactToken(artifactToken)
+		if err != nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid artifact token"})
+			return
+		}
+		if claims.SessionID != sessionID || claims.ArtifactType != artifactType {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "artifact token scope mismatch"})
+			return
+		}
+		projectID = claims.ProjectID
+	}
+
+	session, err := h.loadSession(r.Context(), projectID, sessionID)
 	if err != nil {
 		writeLookupError(w, err)
 		return
@@ -609,6 +670,17 @@ func (h *Handler) requireWriteAccess(next http.Handler) http.Handler {
 	})
 }
 
+func (h *Handler) requireKeyAccess(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.keyAuthenticatedFromContext(r.Context()) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	})
+}
+
 func (h *Handler) requireInternalAccess(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(h.internalAPIKey) == "" {
@@ -682,4 +754,11 @@ func slugSite(site string) string {
 
 func generateRawAPIKey() string {
 	return "rpk_" + strings.ReplaceAll(uuid.NewString(), "-", "") + strings.ReplaceAll(uuid.NewString(), "-", "")
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
