@@ -7,6 +7,9 @@ import { ReplayCanvas } from "../components/ReplayCanvas";
 import { useGetSessionEventsQuery, useGetSessionQuery } from "../features/reporting/reportingApi";
 import type { ErrorMarker } from "../features/sessions/types";
 
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const ingestApiKey = import.meta.env.VITE_INGEST_API_KEY;
+
 export function SessionReplayPage() {
   const { sessionId } = useParams();
   const dispatch = useAppDispatch();
@@ -45,7 +48,19 @@ export function SessionReplayPage() {
     requestSeek(marker.replayOffsetMs - 2_000);
   };
 
-  const latestArtifact = activeSession.artifacts?.[0] ?? null;
+  const analysisArtifact =
+    activeSession.artifacts.find((artifact) => artifact.artifactType === "analysis_json") ??
+    activeSession.artifacts?.[0] ??
+    null;
+  const replayVideoArtifact =
+    activeSession.artifacts.find(
+      (artifact) => artifact.artifactType === "replay_video" && artifact.status === "ready",
+    ) ?? null;
+  const replayVideoSource = replayVideoArtifact
+    ? `${apiBaseUrl}/v1/sessions/${activeSession.id}/artifacts/replay_video${
+        ingestApiKey ? `?key=${encodeURIComponent(ingestApiKey)}` : ""
+      }`
+    : "";
 
   return (
     <section>
@@ -58,27 +73,27 @@ export function SessionReplayPage() {
         </div>
         <Link to="/">Back to issue clusters</Link>
       </div>
-      {latestArtifact && (
+      {analysisArtifact && (
         <article className="artifact-card">
           <header className="artifact-card-header">
             <h2>Latest Replay Analysis</h2>
-            <span>{new Date(latestArtifact.generatedAt).toLocaleString()}</span>
+            <span>{new Date(analysisArtifact.generatedAt).toLocaleString()}</span>
           </header>
           <p>
-            <strong>Status:</strong> {latestArtifact.status} | <strong>Type:</strong>{" "}
-            {latestArtifact.artifactType}
+            <strong>Status:</strong> {analysisArtifact.status} | <strong>Type:</strong>{" "}
+            {analysisArtifact.artifactType}
           </p>
           <p>
-            <strong>Trigger:</strong> {latestArtifact.triggerKind}
+            <strong>Trigger:</strong> {analysisArtifact.triggerKind}
           </p>
           <p>
-            <strong>Artifact Key:</strong> <code>{latestArtifact.artifactKey}</code>
+            <strong>Artifact Key:</strong> <code>{analysisArtifact.artifactKey}</code>
           </p>
           <div className="artifact-window-list">
-            {latestArtifact.windows.length === 0 && (
+            {analysisArtifact.windows.length === 0 && (
               <p className="replay-status">No marker windows returned by replay analysis.</p>
             )}
-            {latestArtifact.windows.map((window, index) => (
+            {analysisArtifact.windows.map((window, index) => (
               <button
                 key={`${window.startMs}-${window.endMs}-${index}`}
                 type="button"
@@ -95,6 +110,25 @@ export function SessionReplayPage() {
               </button>
             ))}
           </div>
+        </article>
+      )}
+      {replayVideoArtifact && (
+        <article className="artifact-card">
+          <header className="artifact-card-header">
+            <h2>Rendered Replay Video</h2>
+            <span>{new Date(replayVideoArtifact.generatedAt).toLocaleString()}</span>
+          </header>
+          <p>
+            <strong>Status:</strong> {replayVideoArtifact.status} | <strong>Key:</strong>{" "}
+            <code>{replayVideoArtifact.artifactKey}</code>
+          </p>
+          <video
+            className="replay-video"
+            src={replayVideoSource}
+            controls
+            preload="metadata"
+            playsInline
+          />
         </article>
       )}
 

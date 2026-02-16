@@ -99,6 +99,7 @@ func (h *Handler) Router() http.Handler {
 			r.Get("/issues", h.listIssues)
 			r.Get("/sessions/{sessionID}", h.getSession)
 			r.Get("/sessions/{sessionID}/events", h.getSessionEvents)
+			r.Get("/sessions/{sessionID}/artifacts/{artifactType}", h.getSessionArtifact)
 			r.With(h.requireWriteAccess).Post("/maintenance/cleanup", h.cleanupExpiredData)
 		})
 	})
@@ -428,6 +429,49 @@ func (h *Handler) getSessionEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) getSessionArtifact(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	artifactType := strings.TrimSpace(chi.URLParam(r, "artifactType"))
+	if artifactType == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "artifactType is required"})
+		return
+	}
+
+	session, err := h.loadSession(r.Context(), h.projectIDFromContext(r.Context()), sessionID)
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
+
+	artifact, found := findArtifactByType(session.Artifacts, artifactType)
+	if !found || strings.TrimSpace(artifact.ArtifactKey) == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
+		return
+	}
+
+	content, contentType, err := h.artifactStore.LoadObject(r.Context(), artifact.ArtifactKey)
+	if err != nil {
+		if errors.Is(err, artifacts.ErrNotConfigured) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "artifact store unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unable to load artifact"})
+		return
+	}
+
+	if contentType == "" {
+		contentType = "application/octet-stream"
+		if artifactType == "analysis_json" {
+			contentType = "application/json"
+		}
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, max-age=60")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
+}
+
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -444,6 +488,15 @@ func writeLookupError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+}
+
+func findArtifactByType(artifacts []store.SessionArtifact, artifactType string) (store.SessionArtifact, bool) {
+	for _, artifact := range artifacts {
+		if artifact.ArtifactType == artifactType {
+			return artifact, true
+		}
+	}
+	return store.SessionArtifact{}, false
 }
 
 func buildReplayJob(session store.Session) (queue.ReplayJob, bool) {
@@ -484,12 +537,15 @@ func strongerTrigger(current, candidate string) string {
 
 func (h *Handler) withProjectContext(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		provided := r.Header.Get("X-Retrospec-Key")
+		provided := strings.TrimSpace(r.Header.Get("X-Retrospec-Key"))
+		if provided == "" {
+			provided = strings.TrimSpace(r.URL.Query().Get("key"))
+		}
 		projectID := defaultProjectID
 		authenticated := false
 
 		switch {
-		case strings.TrimSpace(provided) == "":
+		case provided == "":
 			// anonymous read access falls back to default project.
 		case strings.TrimSpace(h.ingestAPIKey) != "" && provided == h.ingestAPIKey:
 			authenticated = true

@@ -61,16 +61,7 @@ func (s *S3Store) StoreJSON(ctx context.Context, objectKey string, payload json.
 }
 
 func (s *S3Store) LoadJSON(ctx context.Context, objectKey string) (json.RawMessage, error) {
-	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(s.bucket),
-		Key:    aws.String(objectKey),
-	})
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	payload, err := io.ReadAll(resp.Body)
+	payload, _, err := s.LoadObject(ctx, objectKey)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +71,29 @@ func (s *S3Store) LoadJSON(ctx context.Context, objectKey string) (json.RawMessa
 	}
 
 	return json.RawMessage(bytes.TrimSpace(payload)), nil
+}
+
+func (s *S3Store) LoadObject(ctx context.Context, objectKey string) ([]byte, string, error) {
+	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(objectKey),
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	payload, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+
+	contentType := ""
+	if resp.ContentType != nil {
+		contentType = *resp.ContentType
+	}
+
+	return bytes.TrimSpace(payload), contentType, nil
 }
 
 func (s *S3Store) DeleteObject(ctx context.Context, objectKey string) error {

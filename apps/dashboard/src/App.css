@@ -150,6 +150,14 @@
   gap: 0.5rem;
 }
 
+.replay-video {
+  background: #0b111f;
+  border: 1px solid #1f2a44;
+  border-radius: 8px;
+  max-width: 100%;
+  width: 100%;
+}
+
 .replay-player-host {
   align-items: center;
   background: linear-gradient(130deg, #0b111f, #16263f);
