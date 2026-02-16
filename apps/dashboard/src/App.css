@@ -61,6 +61,14 @@
   padding: 0.5rem 0.65rem;
 }
 
+.admin-card select {
+  background: #16263f;
+  border: 1px solid #38507b;
+  border-radius: 8px;
+  color: #e3e8f2;
+  padding: 0.5rem 0.65rem;
+}
+
 .admin-card button {
   background: #1e3a8a;
   border: 1px solid #3b82f6;

@@ -80,7 +80,9 @@ func (h *Handler) Router() http.Handler {
 	r.Get("/healthz", h.healthz)
 	r.Route("/v1", func(r chi.Router) {
 		r.Route("/admin", func(r chi.Router) {
+			r.With(h.requireAdminAccess).Get("/projects", h.listProjects)
 			r.With(h.requireAdminAccess).Post("/projects", h.createProject)
+			r.With(h.requireAdminAccess).Get("/projects/{projectID}/keys", h.listProjectAPIKeys)
 			r.With(h.requireAdminAccess).Post("/projects/{projectID}/keys", h.createProjectAPIKey)
 		})
 
@@ -148,6 +150,16 @@ type createProjectRequest struct {
 	Label string `json:"label"`
 }
 
+func (h *Handler) listProjects(w http.ResponseWriter, r *http.Request) {
+	projects, err := h.store.ListProjects(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "projects lookup failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"projects": projects})
+}
+
 func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
 	payload := createProjectRequest{}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -182,6 +194,17 @@ func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
 
 type createProjectAPIKeyRequest struct {
 	Label string `json:"label"`
+}
+
+func (h *Handler) listProjectAPIKeys(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectID")
+	keys, err := h.store.ListProjectAPIKeys(r.Context(), projectID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "project keys lookup failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
 }
 
 func (h *Handler) createProjectAPIKey(w http.ResponseWriter, r *http.Request) {

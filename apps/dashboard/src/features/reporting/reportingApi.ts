@@ -78,6 +78,16 @@ export const reportingApi = createApi({
         method: "POST",
         body: payload,
       }),
+      invalidatesTags: [{ type: "Issue", id: "LIST" }],
+    }),
+    listProjects: builder.query<
+      Array<{ id: string; name: string; site: string; createdAt: string }>,
+      void
+    >({
+      query: () => "/v1/admin/projects",
+      transformResponse: (response: {
+        projects: Array<{ id: string; name: string; site: string; createdAt: string }>;
+      }) => response.projects,
     }),
     createProjectKey: builder.mutation<
       {
@@ -94,6 +104,29 @@ export const reportingApi = createApi({
         body: { label },
       }),
     }),
+    listProjectKeys: builder.query<
+      Array<{
+        id: string;
+        projectId: string;
+        label: string;
+        status: string;
+        createdAt: string;
+        lastUsedAt: string | null;
+      }>,
+      string
+    >({
+      query: (projectId) => `/v1/admin/projects/${projectId}/keys`,
+      transformResponse: (response: {
+        keys: Array<{
+          id: string;
+          projectId: string;
+          label: string;
+          status: string;
+          createdAt: string;
+          lastUsedAt: string | null;
+        }>;
+      }) => response.keys,
+    }),
   }),
 });
 
@@ -105,4 +138,6 @@ export const {
   useCleanupDataMutation,
   useCreateProjectMutation,
   useCreateProjectKeyMutation,
+  useListProjectsQuery,
+  useListProjectKeysQuery,
 } = reportingApi;

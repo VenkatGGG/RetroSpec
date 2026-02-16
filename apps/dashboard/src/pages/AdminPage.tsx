@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import {
   useCreateProjectKeyMutation,
   useCreateProjectMutation,
+  useListProjectKeysQuery,
+  useListProjectsQuery,
 } from "../features/reporting/reportingApi";
 
 export function AdminPage() {
@@ -13,6 +15,8 @@ export function AdminPage() {
   const [newKeyLabel, setNewKeyLabel] = useState("rotation-key");
   const [resultMessage, setResultMessage] = useState("");
 
+  const { data: projects = [], isLoading: isProjectsLoading } = useListProjectsQuery();
+  const { data: projectKeys = [] } = useListProjectKeysQuery(projectId, { skip: !projectId });
   const [createProject, { isLoading: isCreatingProject }] = useCreateProjectMutation();
   const [createProjectKey, { isLoading: isCreatingKey }] = useCreateProjectKeyMutation();
 
@@ -48,6 +52,7 @@ export function AdminPage() {
         <Link to="/">Back to issues</Link>
       </div>
       <p>Create projects and issue project-specific API keys for SDK integrations.</p>
+      {isProjectsLoading && <p>Loading projects...</p>}
 
       <div className="admin-grid">
         <form className="admin-card" onSubmit={handleCreateProject}>
@@ -86,14 +91,20 @@ export function AdminPage() {
 
         <form className="admin-card" onSubmit={handleCreateProjectKey}>
           <h2>Create Project Key</h2>
-          <label htmlFor="project-id">Project ID</label>
-          <input
+          <label htmlFor="project-id">Project</label>
+          <select
             id="project-id"
             value={projectId}
             onChange={(event) => setProjectId(event.target.value)}
-            placeholder="proj_..."
             required
-          />
+          >
+            <option value="">Select a project</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name} ({project.id})
+              </option>
+            ))}
+          </select>
 
           <label htmlFor="new-key-label">Key label</label>
           <input
@@ -109,6 +120,19 @@ export function AdminPage() {
           </button>
         </form>
       </div>
+
+      {projectId && (
+        <div className="admin-card">
+          <h2>Existing Keys</h2>
+          {projectKeys.length === 0 && <p>No keys found for this project.</p>}
+          {projectKeys.map((key) => (
+            <p key={key.id}>
+              <strong>{key.label}</strong> | {key.status} | Last used:{" "}
+              {key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : "never"}
+            </p>
+          ))}
+        </div>
+      )}
 
       {resultMessage && <p className="admin-result">{resultMessage}</p>}
     </section>

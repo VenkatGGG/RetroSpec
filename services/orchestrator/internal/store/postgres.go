@@ -479,6 +479,34 @@ func (p *Postgres) CreateProjectWithAPIKey(
 	return project, nil
 }
 
+func (p *Postgres) ListProjects(ctx context.Context) ([]Project, error) {
+	rows, err := p.pool.Query(
+		ctx,
+		`SELECT id, name, site, created_at
+		 FROM projects
+		 ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	projects := make([]Project, 0)
+	for rows.Next() {
+		var project Project
+		if err := rows.Scan(&project.ID, &project.Name, &project.Site, &project.CreatedAt); err != nil {
+			return nil, err
+		}
+		projects = append(projects, project)
+	}
+
+	if rows.Err() != nil {
+		return nil, rows.Err()
+	}
+
+	return projects, nil
+}
+
 func (p *Postgres) CreateAPIKeyForProject(
 	ctx context.Context,
 	projectID,
@@ -511,6 +539,44 @@ func (p *Postgres) CreateAPIKeyForProject(
 	}
 
 	return stored, nil
+}
+
+func (p *Postgres) ListProjectAPIKeys(ctx context.Context, projectID string) ([]ProjectAPIKey, error) {
+	projectID = normalizeProjectID(projectID)
+	rows, err := p.pool.Query(
+		ctx,
+		`SELECT id, project_id, label, status, created_at, last_used_at
+		 FROM project_api_keys
+		 WHERE project_id = $1
+		 ORDER BY created_at DESC`,
+		projectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	keys := make([]ProjectAPIKey, 0)
+	for rows.Next() {
+		var apiKey ProjectAPIKey
+		if err := rows.Scan(
+			&apiKey.ID,
+			&apiKey.ProjectID,
+			&apiKey.Label,
+			&apiKey.Status,
+			&apiKey.CreatedAt,
+			&apiKey.LastUsedAt,
+		); err != nil {
+			return nil, err
+		}
+		keys = append(keys, apiKey)
+	}
+
+	if rows.Err() != nil {
+		return nil, rows.Err()
+	}
+
+	return keys, nil
 }
 
 func hashAPIKey(rawKey string) string {

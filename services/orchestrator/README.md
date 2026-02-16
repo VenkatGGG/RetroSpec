@@ -6,7 +6,9 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 
 - `GET /healthz`
 - `POST /v1/admin/projects`
+- `GET /v1/admin/projects`
 - `POST /v1/admin/projects/{projectID}/keys`
+- `GET /v1/admin/projects/{projectID}/keys`
 - `POST /v1/artifacts/session-events`
 - `POST /v1/ingest/session`
 - `POST /v1/issues/promote`
