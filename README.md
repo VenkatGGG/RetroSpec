@@ -14,6 +14,7 @@ RetroSpec is an async web reliability platform that captures browser session eve
 - `apps/dashboard` React + Redux Toolkit dashboard.
 - `services/orchestrator` Go service for ingest, clustering, and reporting.
 - `workers/replay` Async replay/analysis worker (rrweb + media pipeline).
+- `packages/sdk` Browser capture SDK for third-party website integration.
 - `infra` Docker and local infra manifests.
 
 ## Architecture Notes
@@ -41,3 +42,20 @@ RetroSpec is an async web reliability platform that captures browser session eve
 ## Dashboard API
 
 Set `VITE_API_BASE_URL` to point the dashboard at your orchestrator service (default `http://localhost:8080`).
+
+## Website Integration (SDK)
+
+Use `@retrospec/sdk` on customer websites to record rrweb events and report failures:
+
+```ts
+import { initRetrospec } from "@retrospec/sdk";
+
+const retrospec = initRetrospec({
+  apiBaseUrl: "http://localhost:8080",
+  site: "example.com",
+});
+
+window.addEventListener("beforeunload", () => {
+  void retrospec.flush();
+});
+```
