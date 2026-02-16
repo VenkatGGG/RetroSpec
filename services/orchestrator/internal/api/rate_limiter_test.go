@@ -17,7 +17,7 @@ func TestClientAddressPrefersForwardedHeaders(t *testing.T) {
 }
 
 func TestRateLimiterBlocksExcessBurst(t *testing.T) {
-	limiter := newAPIRateLimiter(1, 1)
+	limiter := newAPIRateLimiter(1, 1, nil)
 	if limiter == nil {
 		t.Fatal("expected limiter to be created")
 	}

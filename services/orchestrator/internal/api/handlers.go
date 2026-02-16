@@ -30,6 +30,7 @@ type Handler struct {
 	store                    *store.Postgres
 	clusterPromoteMinSession int
 	rateLimiter              *apiRateLimiter
+	metrics                  *apiMetrics
 	sessionRetentionDays     int
 }
 
@@ -54,6 +55,8 @@ func NewHandler(
 	rateLimitBurst int,
 	sessionRetentionDays int,
 ) *Handler {
+	metrics := newAPIMetrics()
+
 	return &Handler{
 		store:                    store,
 		replayProducer:           replayProducer,
@@ -63,8 +66,11 @@ func NewHandler(
 		internalAPIKey:           internalAPIKey,
 		ingestAPIKey:             ingestAPIKey,
 		clusterPromoteMinSession: clusterPromoteMinSession,
-		rateLimiter:              newAPIRateLimiter(rateLimitRequestsPerSec, rateLimitBurst),
-		sessionRetentionDays:     sessionRetentionDays,
+		rateLimiter: newAPIRateLimiter(rateLimitRequestsPerSec, rateLimitBurst, func() {
+			metrics.rateLimitedTotal.Add(1)
+		}),
+		metrics:              metrics,
+		sessionRetentionDays: sessionRetentionDays,
 	}
 }
 
@@ -88,6 +94,7 @@ func (h *Handler) Router() http.Handler {
 	}))
 
 	r.Get("/healthz", h.healthz)
+	r.Get("/metrics", h.metrics.handleMetrics)
 	r.Route("/v1", func(r chi.Router) {
 		r.Route("/admin", func(r chi.Router) {
 			r.With(h.requireAdminAccess).Get("/projects", h.listProjects)
@@ -140,9 +147,11 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 	if job, ok := buildReplayJob(stored); ok {
 		if err := h.replayProducer.EnqueueReplayJob(r.Context(), job); err != nil {
 			queueError = err.Error()
+			h.metrics.replayQueueErrorsTotal.Add(1)
 			log.Printf("replay job enqueue failed session=%s err=%v", stored.ID, err)
 		}
 	}
+	h.metrics.ingestSessionsTotal.Add(1)
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"session":    stored,
@@ -307,6 +316,7 @@ func (h *Handler) reportReplayResult(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"artifact": artifact,
 	})
+	h.metrics.replayArtifactsTotal.Add(1)
 }
 
 func (h *Handler) uploadSessionEvents(w http.ResponseWriter, r *http.Request) {
@@ -391,6 +401,9 @@ func (h *Handler) cleanupExpiredData(w http.ResponseWriter, r *http.Request) {
 			log.Printf("failed to delete artifact object key=%s err=%v", objectKey, err)
 		}
 	}
+	h.metrics.cleanupRunsTotal.Add(1)
+	h.metrics.cleanupEventObjectsTotal.Add(int64(result.DeletedEventObjects))
+	h.metrics.cleanupArtifactObjectsTotal.Add(int64(result.DeletedArtifactObjects))
 
 	writeJSON(w, http.StatusOK, result)
 }

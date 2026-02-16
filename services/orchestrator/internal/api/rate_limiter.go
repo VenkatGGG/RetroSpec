@@ -17,9 +17,10 @@ type apiRateLimiter struct {
 	ttl      time.Duration
 	clients  map[string]*rate.Limiter
 	lastSeen map[string]time.Time
+	onReject func()
 }
 
-func newAPIRateLimiter(requestsPerSec float64, burst int) *apiRateLimiter {
+func newAPIRateLimiter(requestsPerSec float64, burst int, onReject func()) *apiRateLimiter {
 	if requestsPerSec <= 0 || burst <= 0 {
 		return nil
 	}
@@ -30,12 +31,16 @@ func newAPIRateLimiter(requestsPerSec float64, burst int) *apiRateLimiter {
 		ttl:      10 * time.Minute,
 		clients:  make(map[string]*rate.Limiter),
 		lastSeen: make(map[string]time.Time),
+		onReject: onReject,
 	}
 }
 
 func (l *apiRateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !l.allow(clientAddress(r)) {
+			if l.onReject != nil {
+				l.onReject()
+			}
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 			return
 		}
