@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"time"
 
@@ -10,16 +11,26 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5"
 
+	"retrospec/services/orchestrator/internal/queue"
 	"retrospec/services/orchestrator/internal/store"
 )
 
 type Handler struct {
+	replayProducer           queue.Producer
 	store                    *store.Postgres
 	clusterPromoteMinSession int
 }
 
-func NewHandler(store *store.Postgres, clusterPromoteMinSession int) *Handler {
-	return &Handler{store: store, clusterPromoteMinSession: clusterPromoteMinSession}
+func NewHandler(
+	store *store.Postgres,
+	replayProducer queue.Producer,
+	clusterPromoteMinSession int,
+) *Handler {
+	return &Handler{
+		store:                    store,
+		replayProducer:           replayProducer,
+		clusterPromoteMinSession: clusterPromoteMinSession,
+	}
 }
 
 func (h *Handler) Router() http.Handler {
@@ -62,8 +73,17 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	queueError := ""
+	if job, ok := buildReplayJob(stored); ok {
+		if err := h.replayProducer.EnqueueReplayJob(r.Context(), job); err != nil {
+			queueError = err.Error()
+			log.Printf("replay job enqueue failed session=%s err=%v", stored.ID, err)
+		}
+	}
+
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"session": stored,
+		"session":    stored,
+		"queueError": queueError,
 	})
 }
 
@@ -106,4 +126,39 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func buildReplayJob(session store.Session) (queue.ReplayJob, bool) {
+	if session.EventsObjectKey == "" || len(session.Markers) == 0 {
+		return queue.ReplayJob{}, false
+	}
+
+	offsets := make([]int, 0, len(session.Markers))
+	triggerKind := "ui_no_effect"
+
+	for _, marker := range session.Markers {
+		offsets = append(offsets, marker.ReplayOffsetMs)
+		triggerKind = strongerTrigger(triggerKind, marker.Kind)
+	}
+
+	return queue.ReplayJob{
+		SessionID:       session.ID,
+		EventsObjectKey: session.EventsObjectKey,
+		MarkerOffsetsMs: offsets,
+		TriggerKind:     triggerKind,
+	}, true
+}
+
+func strongerTrigger(current, candidate string) string {
+	weight := map[string]int{
+		"ui_no_effect":      1,
+		"validation_failed": 2,
+		"api_error":         3,
+		"js_exception":      4,
+	}
+
+	if weight[candidate] > weight[current] {
+		return candidate
+	}
+	return current
 }

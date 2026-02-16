@@ -8,6 +8,8 @@ import (
 type Config struct {
 	ListenAddr                string
 	DatabaseURL               string
+	RedisAddr                 string
+	ReplayQueueName           string
 	ClusterPromoteMinSessions int
 }
 
@@ -17,6 +19,8 @@ func Load() Config {
 	return Config{
 		ListenAddr:                ":" + port,
 		DatabaseURL:               databaseURL(),
+		RedisAddr:                 redisAddr(),
+		ReplayQueueName:           envOrDefault("REPLAY_QUEUE_NAME", "replay-jobs"),
 		ClusterPromoteMinSessions: envOrDefaultInt("CLUSTER_PROMOTE_MIN_SESSIONS", 2),
 	}
 }
@@ -40,6 +44,12 @@ func envOrDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func redisAddr() string {
+	host := envOrDefault("REDIS_HOST", "localhost")
+	port := envOrDefault("REDIS_PORT", "6379")
+	return fmt.Sprintf("%s:%s", host, port)
 }
 
 func envOrDefaultInt(key string, fallback int) int {

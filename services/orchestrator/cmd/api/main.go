@@ -11,6 +11,7 @@ import (
 
 	"retrospec/services/orchestrator/internal/api"
 	"retrospec/services/orchestrator/internal/config"
+	"retrospec/services/orchestrator/internal/queue"
 	"retrospec/services/orchestrator/internal/store"
 )
 
@@ -24,7 +25,21 @@ func main() {
 	}
 	defer db.Close()
 
-	handler := api.NewHandler(db, cfg.ClusterPromoteMinSessions)
+	replayQueue, err := queue.NewRedisProducer(cfg.RedisAddr, cfg.ReplayQueueName)
+	if err != nil {
+		log.Printf("replay queue unavailable (%v), continuing with noop producer", err)
+		replayQueue = nil
+	}
+
+	var producer queue.Producer
+	if replayQueue == nil {
+		producer = queue.NewNoopProducer()
+	} else {
+		producer = replayQueue
+	}
+	defer producer.Close()
+
+	handler := api.NewHandler(db, producer, cfg.ClusterPromoteMinSessions)
 	router := handler.Router()
 
 	server := &http.Server{
