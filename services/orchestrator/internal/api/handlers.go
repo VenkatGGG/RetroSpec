@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -22,6 +23,7 @@ import (
 type Handler struct {
 	artifactStore            artifacts.Store
 	replayProducer           queue.Producer
+	corsAllowedOrigins       []string
 	store                    *store.Postgres
 	clusterPromoteMinSession int
 	sessionRetentionDays     int
@@ -31,6 +33,7 @@ func NewHandler(
 	store *store.Postgres,
 	replayProducer queue.Producer,
 	artifactStore artifacts.Store,
+	corsAllowedOrigins []string,
 	clusterPromoteMinSession int,
 	sessionRetentionDays int,
 ) *Handler {
@@ -38,6 +41,7 @@ func NewHandler(
 		store:                    store,
 		replayProducer:           replayProducer,
 		artifactStore:            artifactStore,
+		corsAllowedOrigins:       corsAllowedOrigins,
 		clusterPromoteMinSession: clusterPromoteMinSession,
 		sessionRetentionDays:     sessionRetentionDays,
 	}
@@ -50,6 +54,14 @@ func (h *Handler) Router() http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(15 * time.Second))
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   h.corsAllowedOrigins,
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
 
 	r.Get("/healthz", h.healthz)
 	r.Route("/v1", func(r chi.Router) {

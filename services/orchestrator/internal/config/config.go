@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -10,6 +11,7 @@ type Config struct {
 	DatabaseURL               string
 	RedisAddr                 string
 	ReplayQueueName           string
+	CORSAllowedOrigins        []string
 	SessionRetentionDays      int
 	S3Region                  string
 	S3Endpoint                string
@@ -27,6 +29,7 @@ func Load() Config {
 		DatabaseURL:               databaseURL(),
 		RedisAddr:                 redisAddr(),
 		ReplayQueueName:           envOrDefault("REPLAY_QUEUE_NAME", "replay-jobs"),
+		CORSAllowedOrigins:        parseCSV(envOrDefault("CORS_ALLOWED_ORIGINS", "*")),
 		SessionRetentionDays:      envOrDefaultInt("SESSION_RETENTION_DAYS", 7),
 		S3Region:                  envOrDefault("S3_REGION", "us-east-1"),
 		S3Endpoint:                os.Getenv("S3_ENDPOINT"),
@@ -62,6 +65,23 @@ func redisAddr() string {
 	host := envOrDefault("REDIS_HOST", "localhost")
 	port := envOrDefault("REDIS_PORT", "6379")
 	return fmt.Sprintf("%s:%s", host, port)
+}
+
+func parseCSV(value string) []string {
+	values := strings.Split(value, ",")
+	result := make([]string, 0, len(values))
+	for _, item := range values {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		result = append(result, trimmed)
+	}
+
+	if len(result) == 0 {
+		return []string{"*"}
+	}
+	return result
 }
 
 func envOrDefaultInt(key string, fallback int) int {

@@ -66,6 +66,7 @@ func main() {
 		db,
 		producer,
 		artifactStore,
+		cfg.CORSAllowedOrigins,
 		cfg.ClusterPromoteMinSessions,
 		cfg.SessionRetentionDays,
 	)
