@@ -71,6 +71,8 @@ func main() {
 		cfg.InternalAPIKey,
 		cfg.IngestAPIKey,
 		cfg.ClusterPromoteMinSessions,
+		cfg.RateLimitRequestsPerSec,
+		cfg.RateLimitBurst,
 		cfg.SessionRetentionDays,
 	)
 	router := handler.Router()

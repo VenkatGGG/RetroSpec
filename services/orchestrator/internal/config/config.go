@@ -15,6 +15,8 @@ type Config struct {
 	AdminAPIKey               string
 	InternalAPIKey            string
 	IngestAPIKey              string
+	RateLimitRequestsPerSec   float64
+	RateLimitBurst            int
 	SessionRetentionDays      int
 	S3Region                  string
 	S3Endpoint                string
@@ -36,6 +38,8 @@ func Load() Config {
 		AdminAPIKey:               os.Getenv("ADMIN_API_KEY"),
 		InternalAPIKey:            os.Getenv("INTERNAL_API_KEY"),
 		IngestAPIKey:              os.Getenv("INGEST_API_KEY"),
+		RateLimitRequestsPerSec:   envOrDefaultFloat("RATE_LIMIT_REQUESTS_PER_SEC", 25),
+		RateLimitBurst:            envOrDefaultInt("RATE_LIMIT_BURST", 50),
 		SessionRetentionDays:      envOrDefaultInt("SESSION_RETENTION_DAYS", 7),
 		S3Region:                  envOrDefault("S3_REGION", "us-east-1"),
 		S3Endpoint:                os.Getenv("S3_ENDPOINT"),
@@ -98,6 +102,19 @@ func envOrDefaultInt(key string, fallback int) int {
 
 	var parsed int
 	if _, err := fmt.Sscanf(value, "%d", &parsed); err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envOrDefaultFloat(key string, fallback float64) float64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	var parsed float64
+	if _, err := fmt.Sscanf(value, "%f", &parsed); err != nil {
 		return fallback
 	}
 	return parsed

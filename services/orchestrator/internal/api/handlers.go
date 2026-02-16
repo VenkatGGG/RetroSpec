@@ -29,6 +29,7 @@ type Handler struct {
 	ingestAPIKey             string
 	store                    *store.Postgres
 	clusterPromoteMinSession int
+	rateLimiter              *apiRateLimiter
 	sessionRetentionDays     int
 }
 
@@ -49,6 +50,8 @@ func NewHandler(
 	internalAPIKey string,
 	ingestAPIKey string,
 	clusterPromoteMinSession int,
+	rateLimitRequestsPerSec float64,
+	rateLimitBurst int,
 	sessionRetentionDays int,
 ) *Handler {
 	return &Handler{
@@ -60,6 +63,7 @@ func NewHandler(
 		internalAPIKey:           internalAPIKey,
 		ingestAPIKey:             ingestAPIKey,
 		clusterPromoteMinSession: clusterPromoteMinSession,
+		rateLimiter:              newAPIRateLimiter(rateLimitRequestsPerSec, rateLimitBurst),
 		sessionRetentionDays:     sessionRetentionDays,
 	}
 }
@@ -71,6 +75,9 @@ func (h *Handler) Router() http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(15 * time.Second))
+	if h.rateLimiter != nil {
+		r.Use(h.rateLimiter.Middleware)
+	}
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   h.corsAllowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
@@ -89,6 +96,7 @@ func (h *Handler) Router() http.Handler {
 			r.With(h.requireAdminAccess).Post("/projects/{projectID}/keys", h.createProjectAPIKey)
 		})
 		r.With(h.requireInternalAccess).Post("/internal/replay-results", h.reportReplayResult)
+		r.With(h.withProjectContextAllowQueryKey).Get("/sessions/{sessionID}/artifacts/{artifactType}", h.getSessionArtifact)
 
 		r.Group(func(r chi.Router) {
 			r.Use(h.withProjectContext)
@@ -99,7 +107,6 @@ func (h *Handler) Router() http.Handler {
 			r.Get("/issues", h.listIssues)
 			r.Get("/sessions/{sessionID}", h.getSession)
 			r.Get("/sessions/{sessionID}/events", h.getSessionEvents)
-			r.Get("/sessions/{sessionID}/artifacts/{artifactType}", h.getSessionArtifact)
 			r.With(h.requireWriteAccess).Post("/maintenance/cleanup", h.cleanupExpiredData)
 		})
 	})
@@ -536,9 +543,17 @@ func strongerTrigger(current, candidate string) string {
 }
 
 func (h *Handler) withProjectContext(next http.Handler) http.Handler {
+	return h.withProjectContextMode(next, false)
+}
+
+func (h *Handler) withProjectContextAllowQueryKey(next http.Handler) http.Handler {
+	return h.withProjectContextMode(next, true)
+}
+
+func (h *Handler) withProjectContextMode(next http.Handler, allowQueryKey bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		provided := strings.TrimSpace(r.Header.Get("X-Retrospec-Key"))
-		if provided == "" {
+		if allowQueryKey && provided == "" {
 			provided = strings.TrimSpace(r.URL.Query().Get("key"))
 		}
 		projectID := defaultProjectID
