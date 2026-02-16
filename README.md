@@ -34,6 +34,7 @@ RetroSpec is an async web reliability platform that captures browser session eve
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/001_init.sql`
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/002_issue_cluster_representative_session.sql`
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/003_projects_and_project_api_keys.sql`
+   - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/004_session_artifacts.sql`
 4. Start services:
    - `npm install`
    - `npm run dev -w apps/dashboard`
@@ -46,6 +47,8 @@ Set `VITE_API_BASE_URL` to point the dashboard at your orchestrator service (def
 If backend write auth is enabled, set `VITE_INGEST_API_KEY` so dashboard actions can call protected endpoints.
 Set `ADMIN_API_KEY` on the orchestrator to enable project/key management endpoints.
 Set `VITE_ADMIN_API_KEY` in the dashboard to use `/admin` controls from the UI.
+Set `INTERNAL_API_KEY` on both orchestrator and replay worker so async replay jobs can persist artifact metadata.
+Set `ORCHESTRATOR_BASE_URL` for the replay worker callback target (default `http://localhost:8080`).
 
 ## Website Integration (SDK)
 
