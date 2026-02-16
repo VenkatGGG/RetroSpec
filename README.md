@@ -74,3 +74,5 @@ window.addEventListener("beforeunload", () => {
   void retrospec.flush();
 });
 ```
+
+By default, network failure markers include both `fetch` and `XMLHttpRequest` traffic.

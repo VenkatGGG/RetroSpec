@@ -18,6 +18,7 @@ export interface RetrospecInitOptions {
   autoFlushMs?: number;
   recordConsole?: boolean;
   recordNetwork?: boolean;
+  recordXHR?: boolean;
   detectRageClicks?: boolean;
   detectFormValidation?: boolean;
   detectReloadLoops?: boolean;

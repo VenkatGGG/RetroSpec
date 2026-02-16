@@ -22,6 +22,7 @@ const DEFAULTS = {
   autoFlushMs: 60_000,
   recordConsole: true,
   recordNetwork: true,
+  recordXHR: true,
   detectRageClicks: true,
   detectFormValidation: true,
   detectReloadLoops: true,
@@ -70,6 +71,9 @@ export function initRetrospec(options: RetrospecInitOptions): RetrospecClient {
 
   if (config.recordNetwork) {
     cleanupFns.push(instrumentFetchFailures(state));
+    if (config.recordXHR) {
+      cleanupFns.push(instrumentXHRFailures(state));
+    }
   }
   if (config.detectRageClicks) {
     cleanupFns.push(instrumentRageClicks(state, config.rageClickThreshold, config.rageClickWindowMs));
@@ -299,6 +303,79 @@ function instrumentFetchFailures(state: InternalState): () => void {
 
   return () => {
     window.fetch = originalFetch;
+  };
+}
+
+function instrumentXHRFailures(state: InternalState): () => void {
+  const originalOpen = XMLHttpRequest.prototype.open;
+  const originalSend = XMLHttpRequest.prototype.send;
+  const metaMap = new WeakMap<XMLHttpRequest, { method: string; url: string }>();
+
+  XMLHttpRequest.prototype.open = function (
+    this: XMLHttpRequest,
+    method: string,
+    url: string | URL,
+    ...rest: unknown[]
+  ) {
+    const normalizedMethod = String(method || "GET").toUpperCase();
+    metaMap.set(this, {
+      method: normalizedMethod,
+      url: String(url),
+    });
+
+    return (originalOpen as (...args: unknown[]) => void).call(this, method, url, ...rest);
+  };
+
+  XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: Document | BodyInit | null) {
+    const requestMeta = metaMap.get(this) ?? { method: "GET", url: "unknown" };
+    const method = requestMeta.method;
+    const url = requestMeta.url;
+    const cleanup = () => {
+      this.removeEventListener("loadend", onLoadEnd);
+      this.removeEventListener("error", onError);
+      this.removeEventListener("timeout", onTimeout);
+      this.removeEventListener("abort", onAbort);
+    };
+    const onLoadEnd = () => {
+      if (this.status >= 400) {
+        pushMarker(state, {
+          kind: "api_error",
+          label: `${method} ${url} -> ${this.status}`,
+          clusterHint: `${method}:${normalizePath(url)}:${Math.floor(this.status / 100)}xx`,
+        });
+      }
+      cleanup();
+    };
+    const onError = () => {
+      pushMarker(state, {
+        kind: "api_error",
+        label: `${method} ${url} -> network_error`,
+        clusterHint: `${method}:${normalizePath(url)}:network`,
+      });
+      cleanup();
+    };
+    const onTimeout = () => {
+      pushMarker(state, {
+        kind: "api_error",
+        label: `${method} ${url} -> timeout`,
+        clusterHint: `${method}:${normalizePath(url)}:timeout`,
+      });
+      cleanup();
+    };
+    const onAbort = () => {
+      cleanup();
+    };
+
+    this.addEventListener("loadend", onLoadEnd);
+    this.addEventListener("error", onError);
+    this.addEventListener("timeout", onTimeout);
+    this.addEventListener("abort", onAbort);
+    return originalSend.call(this, body as any);
+  };
+
+  return () => {
+    XMLHttpRequest.prototype.open = originalOpen;
+    XMLHttpRequest.prototype.send = originalSend;
   };
 }
 
