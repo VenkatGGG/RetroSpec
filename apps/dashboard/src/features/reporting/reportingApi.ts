@@ -37,6 +37,22 @@ export const reportingApi = createApi({
       }),
       invalidatesTags: [{ type: "Issue", id: "LIST" }],
     }),
+    cleanupData: builder.mutation<
+      {
+        deletedSessions: number;
+        deletedIssueClusters: number;
+        deletedEventObjects: number;
+        failedEventObjectDelete: number;
+        retentionDays: number;
+      },
+      void
+    >({
+      query: () => ({
+        url: "/v1/maintenance/cleanup",
+        method: "POST",
+      }),
+      invalidatesTags: [{ type: "Issue", id: "LIST" }],
+    }),
   }),
 });
 
@@ -45,4 +61,5 @@ export const {
   useGetSessionQuery,
   useGetSessionEventsQuery,
   usePromoteIssuesMutation,
+  useCleanupDataMutation,
 } = reportingApi;
