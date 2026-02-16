@@ -1,4 +1,4 @@
-import { QueueEvents, Worker } from "bullmq";
+import { Redis } from "ioredis";
 import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { processReplayJob } from "./reconstruct.js";
@@ -11,50 +11,65 @@ const replayJobSchema = z.object({
 });
 
 const config = loadConfig();
-const connection = {
+const queueName = config.queueName;
+const failedQueueName = `${config.queueName}:failed`;
+
+const redis = new Redis({
   host: config.redisHost,
   port: config.redisPort,
-};
-
-const worker = new Worker(
-  config.queueName,
-  async (job) => {
-    const data = replayJobSchema.parse(job.data);
-    const result = await processReplayJob(data);
-    return result;
-  },
-  {
-    connection,
-    concurrency: 2,
-  },
-);
-
-const events = new QueueEvents(config.queueName, { connection });
-
-worker.on("ready", () => {
-  console.info(`[replay-worker] listening queue=${config.queueName}`);
+  maxRetriesPerRequest: null,
 });
 
-worker.on("completed", (job, result) => {
-  console.info(`[replay-worker] completed job=${job.id} artifact=${result.artifactKey}`);
-});
+let shuttingDown = false;
 
-worker.on("failed", (job, err) => {
-  console.error(`[replay-worker] failed job=${job?.id}`, err);
-});
+async function workerLoop() {
+  console.info(`[replay-worker] listening queue=${queueName}`);
 
-events.on("error", (err) => {
-  console.error("[replay-worker] queue events error", err);
-});
+  while (!shuttingDown) {
+    let rawPayload = "";
+    try {
+      const item = await redis.brpop(queueName, 5);
+      if (!item) {
+        continue;
+      }
 
-process.on("SIGINT", async () => {
-  await worker.close();
-  await events.close();
+      rawPayload = item[1];
+      const parsed = replayJobSchema.parse(JSON.parse(rawPayload));
+      const result = await processReplayJob(parsed);
+
+      console.info(
+        `[replay-worker] processed session=${result.sessionId} artifact=${result.artifactKey}`,
+      );
+    } catch (error) {
+      const details = error instanceof Error ? error.message : String(error);
+      console.error("[replay-worker] job failed", details);
+
+      // Push malformed or failed payloads to a dead-letter queue for manual inspection.
+      await redis.lpush(
+        failedQueueName,
+        JSON.stringify({
+          failedAt: new Date().toISOString(),
+          error: details,
+          payload: rawPayload,
+        }),
+      );
+    }
+  }
+}
+
+async function shutdown(signal: string) {
+  console.info(`[replay-worker] shutdown signal=${signal}`);
+  shuttingDown = true;
+  await redis.quit();
   process.exit(0);
+}
+
+process.on("SIGINT", () => {
+  void shutdown("SIGINT");
 });
 
-process.on("SIGTERM", async () => {
-  await worker.close();
-  await events.close();
-  process.exit(0);
+process.on("SIGTERM", () => {
+  void shutdown("SIGTERM");
 });
+
+void workerLoop();

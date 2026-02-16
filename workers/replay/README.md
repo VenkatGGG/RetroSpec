@@ -1,13 +1,14 @@
 # Replay Worker
 
-Async worker that consumes replay jobs, validates rrweb event blobs, generates marker-centered replay metadata, and writes analysis artifacts to S3-compatible storage.
+Async worker that consumes replay jobs from Redis, validates rrweb event blobs, generates marker-centered replay metadata, and writes analysis artifacts to S3-compatible storage.
 
 ## Current Behavior
 
-- Pulls jobs from BullMQ queue (`replay-jobs` by default).
+- Pulls JSON jobs from Redis list (`replay-jobs` by default).
 - Loads rrweb events from object storage.
 - Validates basic rrweb event structure.
 - Writes marker-window artifact JSON back to storage.
+- Pushes failed payloads into dead-letter queue (`replay-jobs:failed`).
 
 ## Next Step
 
