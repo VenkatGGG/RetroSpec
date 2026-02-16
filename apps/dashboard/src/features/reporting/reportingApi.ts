@@ -2,10 +2,19 @@ import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import type { IssueCluster, SessionSummary } from "../sessions/types";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const ingestApiKey = import.meta.env.VITE_INGEST_API_KEY;
 
 export const reportingApi = createApi({
   reducerPath: "reportingApi",
-  baseQuery: fetchBaseQuery({ baseUrl: apiBaseUrl }),
+  baseQuery: fetchBaseQuery({
+    baseUrl: apiBaseUrl,
+    prepareHeaders: (headers) => {
+      if (ingestApiKey) {
+        headers.set("X-Retrospec-Key", ingestApiKey);
+      }
+      return headers;
+    },
+  }),
   tagTypes: ["Issue", "Session"],
   endpoints: (builder) => ({
     getIssues: builder.query<IssueCluster[], void>({
