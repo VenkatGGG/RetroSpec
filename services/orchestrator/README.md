@@ -5,6 +5,7 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 ## Endpoints
 
 - `GET /healthz`
+- `POST /v1/artifacts/session-events`
 - `POST /v1/ingest/session`
 - `POST /v1/issues/promote`
 - `GET /v1/issues`
@@ -26,5 +27,6 @@ go run ./cmd/api
 ## Notes
 
 - `POST /v1/ingest/session` persists session metadata and queues replay jobs in Redis.
+- `POST /v1/artifacts/session-events` stores rrweb event JSON and returns `eventsObjectKey` for session ingest.
 - Session event payloads are loaded from S3-compatible storage via the configured `S3_*` environment variables.
 - `POST /v1/maintenance/cleanup` removes data older than `SESSION_RETENTION_DAYS` (default 7) and prunes orphan issue clusters.

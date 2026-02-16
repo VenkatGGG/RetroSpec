@@ -42,6 +42,24 @@ func NewS3Store(
 	return &S3Store{bucket: bucket, client: client}, nil
 }
 
+func (s *S3Store) StoreJSON(ctx context.Context, objectKey string, payload json.RawMessage) error {
+	if !json.Valid(payload) {
+		return fmt.Errorf("artifact payload is not valid json: %s", objectKey)
+	}
+
+	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(s.bucket),
+		Key:         aws.String(objectKey),
+		Body:        bytes.NewReader(bytes.TrimSpace(payload)),
+		ContentType: aws.String("application/json"),
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (s *S3Store) LoadJSON(ctx context.Context, objectKey string) (json.RawMessage, error) {
 	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),

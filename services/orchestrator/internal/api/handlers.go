@@ -6,10 +6,12 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"retrospec/services/orchestrator/internal/artifacts"
@@ -51,6 +53,7 @@ func (h *Handler) Router() http.Handler {
 
 	r.Get("/healthz", h.healthz)
 	r.Route("/v1", func(r chi.Router) {
+		r.Post("/artifacts/session-events", h.uploadSessionEvents)
 		r.Post("/ingest/session", h.ingestSession)
 		r.Post("/issues/promote", h.promoteIssues)
 		r.Get("/issues", h.listIssues)
@@ -94,6 +97,48 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"session":    stored,
 		"queueError": queueError,
+	})
+}
+
+type uploadSessionEventsRequest struct {
+	SessionID string          `json:"sessionId"`
+	Site      string          `json:"site"`
+	Events    json.RawMessage `json:"events"`
+}
+
+func (h *Handler) uploadSessionEvents(w http.ResponseWriter, r *http.Request) {
+	payload := uploadSessionEventsRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	if len(payload.Events) == 0 || !json.Valid(payload.Events) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "events must be valid json"})
+		return
+	}
+
+	sessionID := payload.SessionID
+	if strings.TrimSpace(sessionID) == "" {
+		sessionID = uuid.NewString()
+	}
+
+	siteKey := slugSite(payload.Site)
+	objectKey := time.Now().UTC().Format("2006/01/02")
+	objectKey = "session-events/" + objectKey + "/" + siteKey + "/" + sessionID + ".json"
+
+	if err := h.artifactStore.StoreJSON(r.Context(), objectKey, payload.Events); err != nil {
+		if errors.Is(err, artifacts.ErrNotConfigured) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "artifact store unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "artifact upload failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"sessionId":       sessionID,
+		"eventsObjectKey": objectKey,
 	})
 }
 
@@ -219,4 +264,28 @@ func strongerTrigger(current, candidate string) string {
 		return candidate
 	}
 	return current
+}
+
+func slugSite(site string) string {
+	site = strings.TrimSpace(strings.ToLower(site))
+	if site == "" {
+		return "unknown-site"
+	}
+
+	builder := strings.Builder{}
+	for _, ch := range site {
+		isAlpha := ch >= 'a' && ch <= 'z'
+		isNumber := ch >= '0' && ch <= '9'
+		if isAlpha || isNumber || ch == '.' || ch == '-' {
+			builder.WriteRune(ch)
+			continue
+		}
+		builder.WriteRune('-')
+	}
+
+	slug := strings.Trim(builder.String(), "-")
+	if slug == "" {
+		return "unknown-site"
+	}
+	return slug
 }
