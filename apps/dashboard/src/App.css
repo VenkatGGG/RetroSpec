@@ -1,0 +1,81 @@
+.app-shell {
+  margin: 0 auto;
+  max-width: 1080px;
+  padding: 2rem;
+}
+
+.cluster-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.cluster-card {
+  background: #101828;
+  border: 1px solid #1f2a44;
+  border-radius: 10px;
+  color: #e3e8f2;
+  padding: 1rem;
+}
+
+.cluster-card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.cluster-card a {
+  color: #8ec5ff;
+  font-weight: 600;
+}
+
+.session-heading {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.replay-panel {
+  background: #101828;
+  border: 1px solid #1f2a44;
+  border-radius: 10px;
+  color: #e3e8f2;
+  padding: 1rem;
+}
+
+.replay-placeholder {
+  align-items: center;
+  background: linear-gradient(130deg, #0b111f, #16263f);
+  border: 1px dashed #38507b;
+  border-radius: 8px;
+  color: #9fb4da;
+  display: flex;
+  font-weight: 600;
+  height: 360px;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.marker-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.marker {
+  align-items: center;
+  background: #16263f;
+  border: 1px solid #38507b;
+  border-radius: 8px;
+  color: #e3e8f2;
+  cursor: pointer;
+  display: flex;
+  font-size: 0.95rem;
+  justify-content: space-between;
+  padding: 0.75rem;
+  text-align: left;
+}
+
+.marker.active {
+  border-color: #6eb0ff;
+  box-shadow: 0 0 0 1px #6eb0ff inset;
+}
