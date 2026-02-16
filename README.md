@@ -37,6 +37,7 @@ RetroSpec is an async web reliability platform that captures browser session eve
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/004_session_artifacts.sql`
 4. Start services:
    - `npm install`
+   - `npx playwright install chromium` (required only if `REPLAY_RENDER_ENABLED=true`)
    - `npm run dev -w apps/dashboard`
    - `go run ./services/orchestrator/cmd/api`
    - `npm run dev -w workers/replay`
@@ -49,6 +50,7 @@ Set `ADMIN_API_KEY` on the orchestrator to enable project/key management endpoin
 Set `VITE_ADMIN_API_KEY` in the dashboard to use `/admin` controls from the UI.
 Set `INTERNAL_API_KEY` on both orchestrator and replay worker so async replay jobs can persist artifact metadata.
 Set `ORCHESTRATOR_BASE_URL` for the replay worker callback target (default `http://localhost:8080`).
+Set `REPLAY_RENDER_ENABLED=true` on the replay worker to render full-session `.webm` assets via Playwright.
 
 ## Website Integration (SDK)
 

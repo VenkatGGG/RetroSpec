@@ -4,6 +4,11 @@ export interface ReplayWorkerConfig {
   queueName: string;
   orchestratorBaseUrl: string;
   internalApiKey: string;
+  renderEnabled: boolean;
+  renderSpeed: number;
+  renderMaxDurationMs: number;
+  renderViewportWidth: number;
+  renderViewportHeight: number;
   s3Endpoint?: string;
   s3Region: string;
   s3AccessKey: string;
@@ -15,10 +20,15 @@ export interface ReplayWorkerConfig {
 export function loadConfig(): ReplayWorkerConfig {
   return {
     redisHost: process.env.REDIS_HOST ?? "localhost",
-    redisPort: Number(process.env.REDIS_PORT ?? 6379),
+    redisPort: envOrDefaultNumber("REDIS_PORT", 6379),
     queueName: process.env.REPLAY_QUEUE_NAME ?? "replay-jobs",
     orchestratorBaseUrl: process.env.ORCHESTRATOR_BASE_URL ?? "http://localhost:8080",
     internalApiKey: process.env.INTERNAL_API_KEY ?? "",
+    renderEnabled: (process.env.REPLAY_RENDER_ENABLED ?? "").toLowerCase() === "true",
+    renderSpeed: envOrDefaultNumber("REPLAY_RENDER_SPEED", 4),
+    renderMaxDurationMs: envOrDefaultNumber("REPLAY_RENDER_MAX_DURATION_MS", 120_000),
+    renderViewportWidth: envOrDefaultNumber("REPLAY_RENDER_VIEWPORT_WIDTH", 1280),
+    renderViewportHeight: envOrDefaultNumber("REPLAY_RENDER_VIEWPORT_HEIGHT", 720),
     s3Endpoint: process.env.S3_ENDPOINT,
     s3Region: process.env.S3_REGION ?? "us-east-1",
     s3AccessKey: process.env.S3_ACCESS_KEY ?? "minioadmin",
@@ -26,4 +36,17 @@ export function loadConfig(): ReplayWorkerConfig {
     s3Bucket: process.env.S3_BUCKET ?? "retrospec-artifacts",
     artifactPrefix: process.env.REPLAY_ARTIFACT_PREFIX ?? "replay-artifacts/",
   };
+}
+
+function envOrDefaultNumber(key: string, fallback: number): number {
+  const value = process.env[key];
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return parsed;
 }

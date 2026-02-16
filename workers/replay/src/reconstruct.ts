@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { loadConfig } from "./config.js";
 import type { ReplayJobData, ReplayResult } from "./types.js";
-import { loadEventsBlob, storeArtifact } from "./s3.js";
+import { renderReplayWebm } from "./render.js";
+import { loadEventsBlob, storeArtifact, storeBinaryArtifact } from "./s3.js";
 
 const rrwebEventSchema = z.object({
   type: z.number(),
@@ -22,7 +23,23 @@ export async function processReplayJob(data: ReplayJobData): Promise<ReplayResul
   const eventsBlob = await loadEventsBlob(data.eventsObjectKey);
 
   // Schema check catches corrupted uploads before expensive rendering starts.
-  rrwebPayloadSchema.parse(eventsBlob);
+  const replayEvents = rrwebPayloadSchema.parse(eventsBlob);
+  const generatedAt = new Date().toISOString();
+  let videoArtifactKey = "";
+  let renderStatus = "skipped";
+  let renderError = "";
+
+  if (config.renderEnabled) {
+    try {
+      const videoBuffer = await renderReplayWebm(replayEvents, config);
+      videoArtifactKey = `${config.artifactPrefix}${data.sessionId}/full-replay.webm`;
+      await storeBinaryArtifact(videoArtifactKey, videoBuffer, "video/webm");
+      renderStatus = "ready";
+    } catch (error) {
+      renderStatus = "failed";
+      renderError = error instanceof Error ? error.message : String(error);
+    }
+  }
 
   const artifact = {
     version: 1,
@@ -31,9 +48,10 @@ export async function processReplayJob(data: ReplayJobData): Promise<ReplayResul
     sourceEventsObjectKey: data.eventsObjectKey,
     markerWindows: markerWindows(data.markerOffsetsMs),
     triggerKind: data.triggerKind,
-    notes:
-      "Replay rendering output placeholder. Hook Playwright/rrweb render pipeline here to emit MP4 or clipped assets.",
-    generatedAt: new Date().toISOString(),
+    replayVideoObjectKey: videoArtifactKey || null,
+    renderStatus,
+    renderError: renderError || null,
+    generatedAt,
   };
 
   const artifactKey = `${config.artifactPrefix}${data.sessionId}/analysis.json`;
@@ -43,6 +61,7 @@ export async function processReplayJob(data: ReplayJobData): Promise<ReplayResul
     sessionId: data.sessionId,
     artifactKey,
     markerWindows: artifact.markerWindows,
-    generatedAt: artifact.generatedAt,
+    generatedAt,
+    videoArtifactKey: videoArtifactKey || undefined,
   };
 }

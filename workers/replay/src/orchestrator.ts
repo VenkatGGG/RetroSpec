@@ -1,14 +1,13 @@
 import type { ReplayWorkerConfig } from "./config.js";
-import type { ReplayJobData, ReplayResult } from "./types.js";
+import type { ReplayArtifactReport } from "./types.js";
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
-export async function reportReplayResult(
+export async function reportReplayArtifact(
   config: ReplayWorkerConfig,
-  job: ReplayJobData,
-  result: ReplayResult,
+  payload: ReplayArtifactReport,
 ): Promise<void> {
   if (!config.internalApiKey) {
     throw new Error("INTERNAL_API_KEY is required for replay callbacks");
@@ -22,14 +21,14 @@ export async function reportReplayResult(
       "X-Retrospec-Internal": config.internalApiKey,
     },
     body: JSON.stringify({
-      projectId: job.projectId,
-      sessionId: result.sessionId,
-      artifactType: "analysis_json",
-      artifactKey: result.artifactKey,
-      triggerKind: job.triggerKind,
-      status: "ready",
-      generatedAt: result.generatedAt,
-      windows: result.markerWindows,
+      projectId: payload.projectId,
+      sessionId: payload.sessionId,
+      artifactType: payload.artifactType,
+      artifactKey: payload.artifactKey,
+      triggerKind: payload.triggerKind,
+      status: payload.status,
+      generatedAt: payload.generatedAt,
+      windows: payload.windows,
     }),
   });
 

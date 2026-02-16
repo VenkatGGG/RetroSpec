@@ -55,3 +55,20 @@ export async function storeArtifact(objectKey: string, payload: unknown): Promis
 
   return objectKey;
 }
+
+export async function storeBinaryArtifact(
+  objectKey: string,
+  payload: Uint8Array,
+  contentType: string,
+): Promise<string> {
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: config.s3Bucket,
+      Key: objectKey,
+      Body: payload,
+      ContentType: contentType,
+    }),
+  );
+
+  return objectKey;
+}
