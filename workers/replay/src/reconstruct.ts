@@ -26,6 +26,7 @@ export async function processReplayJob(data: ReplayJobData): Promise<ReplayResul
 
   const artifact = {
     version: 1,
+    projectId: data.projectId,
     sessionId: data.sessionId,
     sourceEventsObjectKey: data.eventsObjectKey,
     markerWindows: markerWindows(data.markerOffsetsMs),

@@ -1,4 +1,5 @@
 export interface ReplayJobData {
+  projectId: string;
   sessionId: string;
   eventsObjectKey: string;
   markerOffsetsMs: number[];
