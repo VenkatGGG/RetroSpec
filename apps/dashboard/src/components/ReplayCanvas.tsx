@@ -8,6 +8,7 @@ interface ReplayCanvasProps {
   events: unknown[];
   isEventsLoading: boolean;
   eventsError: string | null;
+  seekRequest: { offsetMs: number; token: number } | null;
   onSeekToMarker: (marker: ErrorMarker) => void;
 }
 
@@ -37,6 +38,7 @@ export function ReplayCanvas({
   events,
   isEventsLoading,
   eventsError,
+  seekRequest,
   onSeekToMarker,
 }: ReplayCanvasProps) {
   const playerHostRef = useRef<HTMLDivElement | null>(null);
@@ -105,6 +107,15 @@ export function ReplayCanvas({
     playerRef.current.play?.();
   }, [activeMarker]);
 
+  useEffect(() => {
+    if (!seekRequest || !playerRef.current) {
+      return;
+    }
+
+    playerRef.current.goto(Math.max(0, seekRequest.offsetMs), false);
+    playerRef.current.play?.();
+  }, [seekRequest]);
+
   return (
     <section className="replay-panel">
       <header>
@@ -123,6 +134,7 @@ export function ReplayCanvas({
 
       <div className="marker-list">
         <h4>Detected Error Markers</h4>
+        {markers.length === 0 && <p className="replay-status">No markers captured for this session.</p>}
         {markers.map((marker) => (
           <button
             key={marker.id}

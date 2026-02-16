@@ -124,6 +124,32 @@
   padding: 1rem;
 }
 
+.artifact-card {
+  background: #101828;
+  border: 1px solid #1f2a44;
+  border-radius: 10px;
+  color: #e3e8f2;
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+}
+
+.artifact-card-header {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+}
+
+.artifact-card-header h2 {
+  margin: 0;
+}
+
+.artifact-window-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
 .replay-player-host {
   align-items: center;
   background: linear-gradient(130deg, #0b111f, #16263f);

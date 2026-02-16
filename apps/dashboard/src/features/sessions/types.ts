@@ -12,6 +12,25 @@ export interface ErrorMarker {
   kind: FailureKind;
 }
 
+export interface ArtifactWindow {
+  startMs: number;
+  endMs: number;
+}
+
+export interface SessionArtifact {
+  id: string;
+  projectId: string;
+  sessionId: string;
+  artifactType: string;
+  artifactKey: string;
+  triggerKind: FailureKind;
+  status: string;
+  generatedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  windows: ArtifactWindow[];
+}
+
 export interface SessionSummary {
   id: string;
   site: string;
@@ -21,6 +40,7 @@ export interface SessionSummary {
   eventsObjectKey?: string;
   createdAt?: string;
   markers: ErrorMarker[];
+  artifacts: SessionArtifact[];
 }
 
 export interface IssueCluster {
