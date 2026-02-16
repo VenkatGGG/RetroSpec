@@ -3,7 +3,7 @@ import { useAppDispatch, useAppSelector } from "../app/hooks";
 import { selectActiveMarkerId } from "../features/sessions/selectors";
 import { setActiveMarker } from "../features/sessions/sessionSlice";
 import { ReplayCanvas } from "../components/ReplayCanvas";
-import { useGetSessionQuery } from "../features/reporting/reportingApi";
+import { useGetSessionEventsQuery, useGetSessionQuery } from "../features/reporting/reportingApi";
 import type { ErrorMarker } from "../features/sessions/types";
 
 export function SessionReplayPage() {
@@ -15,6 +15,11 @@ export function SessionReplayPage() {
     isLoading,
     isError,
   } = useGetSessionQuery(sessionId ?? "", { skip: !sessionId });
+  const {
+    data: replayEvents = [],
+    isLoading: isEventsLoading,
+    error: eventsError,
+  } = useGetSessionEventsQuery(sessionId ?? "", { skip: !sessionId });
 
   if (!activeSession) {
     return (
@@ -46,6 +51,9 @@ export function SessionReplayPage() {
       <ReplayCanvas
         markers={activeSession.markers}
         activeMarkerId={activeMarkerId}
+        events={replayEvents}
+        isEventsLoading={isEventsLoading}
+        eventsError={eventsError ? "Unable to load replay events." : null}
         onSeekToMarker={handleSeekToMarker}
       />
     </section>

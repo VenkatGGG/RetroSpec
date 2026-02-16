@@ -24,6 +24,12 @@ export const reportingApi = createApi({
       transformResponse: (response: { session: SessionSummary }) => response.session,
       providesTags: (_result, _error, sessionId) => [{ type: "Session", id: sessionId }],
     }),
+    getSessionEvents: builder.query<unknown[], string>({
+      query: (sessionId) => `/v1/sessions/${sessionId}/events`,
+      transformResponse: (response: { events: unknown }) =>
+        Array.isArray(response.events) ? response.events : [],
+      providesTags: (_result, _error, sessionId) => [{ type: "Session", id: `${sessionId}:events` }],
+    }),
     promoteIssues: builder.mutation<{ promoted: IssueCluster[] }, void>({
       query: () => ({
         url: "/v1/issues/promote",
@@ -34,4 +40,9 @@ export const reportingApi = createApi({
   }),
 });
 
-export const { useGetIssuesQuery, useGetSessionQuery, usePromoteIssuesMutation } = reportingApi;
+export const {
+  useGetIssuesQuery,
+  useGetSessionQuery,
+  useGetSessionEventsQuery,
+  usePromoteIssuesMutation,
+} = reportingApi;

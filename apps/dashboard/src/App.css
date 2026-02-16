@@ -65,17 +65,26 @@
   padding: 1rem;
 }
 
-.replay-placeholder {
+.replay-player-host {
   align-items: center;
   background: linear-gradient(130deg, #0b111f, #16263f);
-  border: 1px dashed #38507b;
+  border: 1px solid #1f2a44;
   border-radius: 8px;
-  color: #9fb4da;
   display: flex;
-  font-weight: 600;
-  height: 360px;
   justify-content: center;
   margin-bottom: 1rem;
+  min-height: 360px;
+  overflow: auto;
+  padding: 0.5rem;
+}
+
+.replay-status {
+  color: #9fb4da;
+  font-weight: 600;
+}
+
+.replay-status.error {
+  color: #fca5a5;
 }
 
 .marker-list {
