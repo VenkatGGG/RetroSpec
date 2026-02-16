@@ -59,3 +59,9 @@ type ErrorMarkerInput struct {
 type PromoteResult struct {
 	Promoted []IssueCluster `json:"promoted"`
 }
+
+type CleanupResult struct {
+	DeletedSessions      int `json:"deletedSessions"`
+	DeletedIssueClusters int `json:"deletedIssueClusters"`
+	RetentionDays        int `json:"retentionDays"`
+}

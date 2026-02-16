@@ -314,3 +314,53 @@ func (p *Postgres) GetSession(ctx context.Context, id string) (Session, error) {
 
 	return session, nil
 }
+
+func (p *Postgres) CleanupExpiredData(ctx context.Context, retentionDays int) (CleanupResult, error) {
+	if retentionDays < 1 {
+		return CleanupResult{}, fmt.Errorf("retentionDays must be >= 1")
+	}
+
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return CleanupResult{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var deletedSessions int
+	err = tx.QueryRow(
+		ctx,
+		`WITH deleted AS (
+		   DELETE FROM sessions
+		   WHERE created_at < NOW() - ($1::text || ' days')::interval
+		   RETURNING id
+		 )
+		 SELECT COUNT(*) FROM deleted`,
+		retentionDays,
+	).Scan(&deletedSessions)
+	if err != nil {
+		return CleanupResult{}, err
+	}
+
+	commandTag, err := tx.Exec(
+		ctx,
+		`DELETE FROM issue_clusters ic
+		 WHERE NOT EXISTS (
+		   SELECT 1
+		   FROM error_markers em
+		   WHERE em.cluster_key = ic.key
+		 )`,
+	)
+	if err != nil {
+		return CleanupResult{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return CleanupResult{}, err
+	}
+
+	return CleanupResult{
+		DeletedSessions:      deletedSessions,
+		DeletedIssueClusters: int(commandTag.RowsAffected()),
+		RetentionDays:        retentionDays,
+	}, nil
+}

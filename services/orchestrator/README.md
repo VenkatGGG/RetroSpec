@@ -10,6 +10,7 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 - `GET /v1/issues`
 - `GET /v1/sessions/{sessionID}`
 - `GET /v1/sessions/{sessionID}/events`
+- `POST /v1/maintenance/cleanup`
 
 ## Run
 
@@ -26,3 +27,4 @@ go run ./cmd/api
 
 - `POST /v1/ingest/session` persists session metadata and queues replay jobs in Redis.
 - Session event payloads are loaded from S3-compatible storage via the configured `S3_*` environment variables.
+- `POST /v1/maintenance/cleanup` removes data older than `SESSION_RETENTION_DAYS` (default 7) and prunes orphan issue clusters.

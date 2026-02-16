@@ -22,6 +22,7 @@ type Handler struct {
 	replayProducer           queue.Producer
 	store                    *store.Postgres
 	clusterPromoteMinSession int
+	sessionRetentionDays     int
 }
 
 func NewHandler(
@@ -29,12 +30,14 @@ func NewHandler(
 	replayProducer queue.Producer,
 	artifactStore artifacts.Store,
 	clusterPromoteMinSession int,
+	sessionRetentionDays int,
 ) *Handler {
 	return &Handler{
 		store:                    store,
 		replayProducer:           replayProducer,
 		artifactStore:            artifactStore,
 		clusterPromoteMinSession: clusterPromoteMinSession,
+		sessionRetentionDays:     sessionRetentionDays,
 	}
 }
 
@@ -53,6 +56,7 @@ func (h *Handler) Router() http.Handler {
 		r.Get("/issues", h.listIssues)
 		r.Get("/sessions/{sessionID}", h.getSession)
 		r.Get("/sessions/{sessionID}/events", h.getSessionEvents)
+		r.Post("/maintenance/cleanup", h.cleanupExpiredData)
 	})
 
 	return r
@@ -111,6 +115,16 @@ func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"issues": clusters})
+}
+
+func (h *Handler) cleanupExpiredData(w http.ResponseWriter, r *http.Request) {
+	result, err := h.store.CleanupExpiredData(r.Context(), h.sessionRetentionDays)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cleanup failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {

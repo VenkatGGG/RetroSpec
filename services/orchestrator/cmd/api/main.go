@@ -62,7 +62,13 @@ func main() {
 	}
 	defer artifactStore.Close()
 
-	handler := api.NewHandler(db, producer, artifactStore, cfg.ClusterPromoteMinSessions)
+	handler := api.NewHandler(
+		db,
+		producer,
+		artifactStore,
+		cfg.ClusterPromoteMinSessions,
+		cfg.SessionRetentionDays,
+	)
 	router := handler.Router()
 
 	server := &http.Server{
