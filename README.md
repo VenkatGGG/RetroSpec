@@ -52,6 +52,7 @@ Set `INTERNAL_API_KEY` on both orchestrator and replay worker so async replay jo
 Set `ORCHESTRATOR_BASE_URL` for the replay worker callback target (default `http://localhost:8080`).
 Set `REPLAY_RENDER_ENABLED=true` on the replay worker to render full-session `.webm` assets via Playwright.
 Replay worker retries failed jobs automatically (`REPLAY_MAX_ATTEMPTS`, `REPLAY_RETRY_BASE_MS`) before dead-lettering.
+Replay worker deduplicates repeated payloads for a TTL window (`REPLAY_DEDUPE_WINDOW_SEC`).
 API rate limiting is configurable with `RATE_LIMIT_REQUESTS_PER_SEC` and `RATE_LIMIT_BURST`.
 
 ## Website Integration (SDK)

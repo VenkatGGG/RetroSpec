@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Redis } from "ioredis";
 import { z } from "zod";
 import { loadConfig } from "./config.js";
@@ -25,6 +26,25 @@ const redis = new Redis({
 });
 
 let shuttingDown = false;
+
+function jobFingerprint(parsed: z.infer<typeof replayJobSchema>): string {
+  return createHash("sha1")
+    .update(
+      [
+        parsed.projectId,
+        parsed.sessionId,
+        parsed.eventsObjectKey,
+        parsed.triggerKind,
+        parsed.markerOffsetsMs.join(","),
+      ].join("|"),
+    )
+    .digest("hex")
+    .slice(0, 24);
+}
+
+function dedupeKey(parsed: z.infer<typeof replayJobSchema>): string {
+  return `${queueName}:done:${jobFingerprint(parsed)}`;
+}
 
 async function drainRetryQueue(): Promise<void> {
   const now = Date.now();
@@ -65,6 +85,15 @@ async function workerLoop() {
 
       rawPayload = item[1];
       parsed = replayJobSchema.parse(JSON.parse(rawPayload));
+      const doneKey = dedupeKey(parsed);
+      const alreadyDone = await redis.get(doneKey);
+      if (alreadyDone) {
+        console.info(
+          `[replay-worker] skipped duplicate session=${parsed.sessionId} project=${parsed.projectId} attempt=${parsed.attempt}`,
+        );
+        continue;
+      }
+
       const result = await processReplayJob(parsed);
       await reportReplayArtifact(config, {
         projectId: parsed.projectId,
@@ -88,6 +117,7 @@ async function workerLoop() {
           windows: result.markerWindows,
         });
       }
+      await redis.set(doneKey, result.generatedAt, "EX", Math.max(60, config.dedupeWindowSec));
 
       console.info(
         `[replay-worker] processed session=${result.sessionId} project=${parsed.projectId} analysis=${result.artifactKey} video=${result.videoArtifactKey ?? "none"}`,
