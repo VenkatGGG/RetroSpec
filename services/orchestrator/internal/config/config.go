@@ -10,6 +10,11 @@ type Config struct {
 	DatabaseURL               string
 	RedisAddr                 string
 	ReplayQueueName           string
+	S3Region                  string
+	S3Endpoint                string
+	S3AccessKey               string
+	S3SecretKey               string
+	S3Bucket                  string
 	ClusterPromoteMinSessions int
 }
 
@@ -21,6 +26,11 @@ func Load() Config {
 		DatabaseURL:               databaseURL(),
 		RedisAddr:                 redisAddr(),
 		ReplayQueueName:           envOrDefault("REPLAY_QUEUE_NAME", "replay-jobs"),
+		S3Region:                  envOrDefault("S3_REGION", "us-east-1"),
+		S3Endpoint:                os.Getenv("S3_ENDPOINT"),
+		S3AccessKey:               envOrDefault("S3_ACCESS_KEY", ""),
+		S3SecretKey:               envOrDefault("S3_SECRET_KEY", ""),
+		S3Bucket:                  envOrDefault("S3_BUCKET", ""),
 		ClusterPromoteMinSessions: envOrDefaultInt("CLUSTER_PROMOTE_MIN_SESSIONS", 2),
 	}
 }

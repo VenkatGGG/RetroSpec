@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -11,11 +12,13 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5"
 
+	"retrospec/services/orchestrator/internal/artifacts"
 	"retrospec/services/orchestrator/internal/queue"
 	"retrospec/services/orchestrator/internal/store"
 )
 
 type Handler struct {
+	artifactStore            artifacts.Store
 	replayProducer           queue.Producer
 	store                    *store.Postgres
 	clusterPromoteMinSession int
@@ -24,11 +27,13 @@ type Handler struct {
 func NewHandler(
 	store *store.Postgres,
 	replayProducer queue.Producer,
+	artifactStore artifacts.Store,
 	clusterPromoteMinSession int,
 ) *Handler {
 	return &Handler{
 		store:                    store,
 		replayProducer:           replayProducer,
+		artifactStore:            artifactStore,
 		clusterPromoteMinSession: clusterPromoteMinSession,
 	}
 }
@@ -47,6 +52,7 @@ func (h *Handler) Router() http.Handler {
 		r.Post("/issues/promote", h.promoteIssues)
 		r.Get("/issues", h.listIssues)
 		r.Get("/sessions/{sessionID}", h.getSession)
+		r.Get("/sessions/{sessionID}/events", h.getSessionEvents)
 	})
 
 	return r
@@ -109,23 +115,61 @@ func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
-	session, err := h.store.GetSession(r.Context(), sessionID)
+	session, err := h.loadSession(r.Context(), sessionID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		writeLookupError(w, err)
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"session": session})
 }
 
+func (h *Handler) getSessionEvents(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	session, err := h.loadSession(r.Context(), sessionID)
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
+
+	if session.EventsObjectKey == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session has no events object key"})
+		return
+	}
+
+	eventsJSON, err := h.artifactStore.LoadJSON(r.Context(), session.EventsObjectKey)
+	if err != nil {
+		if errors.Is(err, artifacts.ErrNotConfigured) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "artifact store unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unable to load session events"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sessionId":       session.ID,
+		"eventsObjectKey": session.EventsObjectKey,
+		"events":          eventsJSON,
+	})
+}
+
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func (h *Handler) loadSession(ctx context.Context, sessionID string) (store.Session, error) {
+	return h.store.GetSession(ctx, sessionID)
+}
+
+func writeLookupError(w http.ResponseWriter, err error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+		return
+	}
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
 }
 
 func buildReplayJob(session store.Session) (queue.ReplayJob, bool) {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"retrospec/services/orchestrator/internal/api"
+	"retrospec/services/orchestrator/internal/artifacts"
 	"retrospec/services/orchestrator/internal/config"
 	"retrospec/services/orchestrator/internal/queue"
 	"retrospec/services/orchestrator/internal/store"
@@ -39,7 +40,29 @@ func main() {
 	}
 	defer producer.Close()
 
-	handler := api.NewHandler(db, producer, cfg.ClusterPromoteMinSessions)
+	var artifactStore artifacts.Store
+	if cfg.S3Bucket == "" || cfg.S3AccessKey == "" || cfg.S3SecretKey == "" {
+		log.Printf("artifact store disabled: missing s3 credentials or bucket")
+		artifactStore = artifacts.NewNoopStore()
+	} else {
+		s3Store, err := artifacts.NewS3Store(
+			ctx,
+			cfg.S3Region,
+			cfg.S3Endpoint,
+			cfg.S3AccessKey,
+			cfg.S3SecretKey,
+			cfg.S3Bucket,
+		)
+		if err != nil {
+			log.Printf("artifact store unavailable (%v), continuing with noop store", err)
+			artifactStore = artifacts.NewNoopStore()
+		} else {
+			artifactStore = s3Store
+		}
+	}
+	defer artifactStore.Close()
+
+	handler := api.NewHandler(db, producer, artifactStore, cfg.ClusterPromoteMinSessions)
 	router := handler.Router()
 
 	server := &http.Server{
