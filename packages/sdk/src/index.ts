@@ -22,6 +22,13 @@ const DEFAULTS = {
   autoFlushMs: 60_000,
   recordConsole: true,
   recordNetwork: true,
+  detectRageClicks: true,
+  detectFormValidation: true,
+  detectReloadLoops: true,
+  rageClickThreshold: 3,
+  rageClickWindowMs: 1_200,
+  reloadLoopThreshold: 3,
+  reloadLoopWindowMs: 15_000,
   debug: false,
 };
 
@@ -63,6 +70,15 @@ export function initRetrospec(options: RetrospecInitOptions): RetrospecClient {
 
   if (config.recordNetwork) {
     cleanupFns.push(instrumentFetchFailures(state));
+  }
+  if (config.detectRageClicks) {
+    cleanupFns.push(instrumentRageClicks(state, config.rageClickThreshold, config.rageClickWindowMs));
+  }
+  if (config.detectFormValidation) {
+    cleanupFns.push(instrumentValidationFailures(state));
+  }
+  if (config.detectReloadLoops) {
+    detectReloadLoop(state, config.reloadLoopThreshold, config.reloadLoopWindowMs);
   }
 
   const onPageHide = () => {
@@ -291,13 +307,178 @@ function pushMarker(
   input: { kind: MarkerKind; label: string; clusterHint: string },
 ): void {
   const offset = Date.now() - state.startedAt.getTime();
+  const clusterKey = `${input.kind}:${input.clusterHint}`;
+  const previous = state.markers[state.markers.length - 1];
+  if (
+    previous &&
+    previous.clusterKey === clusterKey &&
+    Math.abs(previous.replayOffsetMs - offset) < 750
+  ) {
+    return;
+  }
+
   state.markers.push({
     id: generateId(),
-    clusterKey: `${input.kind}:${input.clusterHint}`,
+    clusterKey,
     label: input.label.slice(0, 220),
     replayOffsetMs: Math.max(0, offset),
     kind: input.kind,
   });
+}
+
+function instrumentRageClicks(
+  state: InternalState,
+  thresholdRaw: number,
+  windowMsRaw: number,
+): () => void {
+  const threshold = Math.max(2, Math.floor(thresholdRaw));
+  const windowMs = Math.max(500, Math.floor(windowMsRaw));
+  const recentClicks: Array<{ at: number; signature: string }> = [];
+  const emittedAt = new Map<string, number>();
+
+  const onClick = (event: MouseEvent) => {
+    const signature = event.target instanceof Element ? elementSignature(event.target) : "unknown";
+    const now = Date.now();
+
+    recentClicks.push({ at: now, signature });
+    while (recentClicks.length > 0) {
+      const firstClick = recentClicks[0];
+      if (!firstClick || now-firstClick.at <= windowMs) {
+        break;
+      }
+      recentClicks.shift();
+    }
+
+    const repeats = recentClicks.reduce((count, click) => {
+      if (click.signature === signature) {
+        return count + 1;
+      }
+      return count;
+    }, 0);
+
+    const lastEmittedAt = emittedAt.get(signature) ?? 0;
+    if (repeats >= threshold && now - lastEmittedAt >= windowMs) {
+      emittedAt.set(signature, now);
+      pushMarker(state, {
+        kind: "ui_no_effect",
+        label: `Repeated clicks with no progress on ${signature}`,
+        clusterHint: `rage:${normalizeToken(signature)}:${normalizePath(window.location.pathname)}`,
+      });
+    }
+  };
+
+  window.addEventListener("click", onClick, true);
+  return () => {
+    window.removeEventListener("click", onClick, true);
+  };
+}
+
+function instrumentValidationFailures(state: InternalState): () => void {
+  const onInvalid = (event: Event) => {
+    if (!(event.target instanceof Element)) {
+      return;
+    }
+
+    const signature = elementSignature(event.target);
+    const fieldName = detectFieldName(event.target);
+    pushMarker(state, {
+      kind: "validation_failed",
+      label: `Validation blocked submission: ${fieldName}`,
+      clusterHint: `invalid:${normalizeToken(signature)}:${normalizePath(window.location.pathname)}`,
+    });
+  };
+
+  window.addEventListener("invalid", onInvalid, true);
+  return () => {
+    window.removeEventListener("invalid", onInvalid, true);
+  };
+}
+
+function detectReloadLoop(state: InternalState, thresholdRaw: number, windowMsRaw: number): void {
+  const threshold = Math.max(2, Math.floor(thresholdRaw));
+  const windowMs = Math.max(1_000, Math.floor(windowMsRaw));
+  const storageKey = "__retrospec_recent_loads";
+  const now = Date.now();
+
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    const previous = raw ? (JSON.parse(raw) as unknown) : [];
+    const numericTimestamps = Array.isArray(previous)
+      ? previous.filter((item): item is number => typeof item === "number")
+      : [];
+    const recent = numericTimestamps.filter((timestamp) => now - timestamp <= windowMs);
+    recent.push(now);
+
+    window.localStorage.setItem(storageKey, JSON.stringify(recent.slice(-20)));
+    if (recent.length >= threshold) {
+      pushMarker(state, {
+        kind: "ui_no_effect",
+        label: `Rapid reload loop detected (${recent.length} reloads)`,
+        clusterHint: `reload-loop:${normalizePath(window.location.pathname)}`,
+      });
+    }
+  } catch {
+    // Ignore storage failures (private mode or blocked storage).
+  }
+}
+
+function detectFieldName(element: Element): string {
+  if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    return element.name || element.id || element.type || element.tagName.toLowerCase();
+  }
+
+  const id = element.getAttribute("id");
+  if (id) {
+    return id;
+  }
+
+  return element.tagName.toLowerCase();
+}
+
+function elementSignature(element: Element): string {
+  const tag = element.tagName.toLowerCase();
+  const id = element.getAttribute("id");
+  const role = element.getAttribute("role");
+  const testID = element.getAttribute("data-testid") || element.getAttribute("data-test-id");
+  const aria = element.getAttribute("aria-label");
+  const classes = Array.from(element.classList).slice(0, 2).map(normalizeToken).filter(Boolean);
+  const text = normalizeToken((element.textContent ?? "").slice(0, 40));
+
+  const tokens = [`tag:${tag}`];
+  if (id) {
+    tokens.push(`id:${normalizeToken(id)}`);
+  }
+  if (role) {
+    tokens.push(`role:${normalizeToken(role)}`);
+  }
+  if (testID) {
+    tokens.push(`test:${normalizeToken(testID)}`);
+  }
+  if (aria) {
+    tokens.push(`aria:${normalizeToken(aria)}`);
+  }
+  if (classes.length > 0) {
+    tokens.push(`class:${classes.join(".")}`);
+  }
+  if (text) {
+    tokens.push(`text:${text}`);
+  }
+
+  return tokens.join("|").slice(0, 160);
+}
+
+function normalizeToken(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9:_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
 }
 
 function extractUrl(input: RequestInfo | URL): string {

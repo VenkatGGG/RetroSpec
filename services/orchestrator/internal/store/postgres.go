@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +19,17 @@ import (
 type Postgres struct {
 	pool *pgxpool.Pool
 }
+
+var (
+	clusterEmailRegex      = regexp.MustCompile(`[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}`)
+	clusterUUIDRegex       = regexp.MustCompile(`\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b`)
+	clusterURLRegex        = regexp.MustCompile(`https?://[^\s]+`)
+	clusterStatusCodeRegex = regexp.MustCompile(`\b([1-5])[0-9]{2}\b`)
+	clusterNumberRegex     = regexp.MustCompile(`\b\d{2,}\b`)
+	clusterHexRegex        = regexp.MustCompile(`\b[0-9a-f]{10,}\b`)
+	clusterSpaceRegex      = regexp.MustCompile(`\s+`)
+	clusterTokenRegex      = regexp.MustCompile(`[^a-z0-9._:-]+`)
+)
 
 func NewPostgres(ctx context.Context, databaseURL string) (*Postgres, error) {
 	pool, err := pgxpool.New(ctx, databaseURL)
@@ -97,6 +110,16 @@ func (p *Postgres) Ingest(ctx context.Context, projectID string, payload IngestP
 		if markerID == "" {
 			markerID = uuid.NewString()
 		}
+		kind := normalizeMarkerKind(marker.Kind)
+		label := strings.TrimSpace(marker.Label)
+		if label == "" {
+			label = kind
+		}
+		replayOffsetMs := marker.ReplayOffsetMs
+		if replayOffsetMs < 0 {
+			replayOffsetMs = 0
+		}
+		clusterKey := deriveClusterKey(payload.Session.Route, kind, marker.ClusterKey, label)
 
 		stored := ErrorMark{}
 		err := tx.QueryRow(
@@ -111,10 +134,10 @@ func (p *Postgres) Ingest(ctx context.Context, projectID string, payload IngestP
 			 RETURNING id, session_id, cluster_key, label, replay_offset_ms, kind, observed_at`,
 			markerID,
 			sessionID,
-			marker.ClusterKey,
-			marker.Label,
-			marker.ReplayOffsetMs,
-			marker.Kind,
+			clusterKey,
+			label,
+			replayOffsetMs,
+			kind,
 		).Scan(
 			&stored.ID,
 			&stored.SessionID,
@@ -725,6 +748,151 @@ func (p *Postgres) UpsertSessionArtifact(
 	}
 
 	return stored, nil
+}
+
+func normalizeMarkerKind(kind string) string {
+	trimmed := strings.TrimSpace(kind)
+	switch trimmed {
+	case "validation_failed", "api_error", "js_exception", "ui_no_effect":
+		return trimmed
+	default:
+		return "ui_no_effect"
+	}
+}
+
+func deriveClusterKey(route, kind, clusterHint, label string) string {
+	normalizedKind := normalizeMarkerKind(kind)
+	normalizedRoute := normalizeRouteForCluster(route)
+	normalizedHint := normalizeTextForCluster(clusterHint)
+	normalizedLabel := normalizeTextForCluster(label)
+
+	if normalizedHint == "" || normalizedHint == "unknown" {
+		normalizedHint = normalizedLabel
+	}
+	if normalizedLabel == "" || normalizedLabel == "unknown" {
+		normalizedLabel = normalizedHint
+	}
+	if normalizedHint == "" {
+		normalizedHint = "unknown"
+	}
+	if normalizedLabel == "" {
+		normalizedLabel = "unknown"
+	}
+
+	base := strings.Join([]string{
+		normalizedKind,
+		normalizedRoute,
+		normalizedHint,
+		normalizedLabel,
+	}, "|")
+	hash := sha256.Sum256([]byte(base))
+	return fmt.Sprintf("%s:%s", normalizedKind, hex.EncodeToString(hash[:8]))
+}
+
+func normalizeTextForCluster(input string) string {
+	value := strings.ToLower(strings.TrimSpace(input))
+	if value == "" {
+		return "unknown"
+	}
+
+	value = clusterEmailRegex.ReplaceAllString(value, "<email>")
+	value = clusterUUIDRegex.ReplaceAllString(value, "<uuid>")
+	value = clusterURLRegex.ReplaceAllStringFunc(value, normalizeURLForCluster)
+	value = clusterStatusCodeRegex.ReplaceAllString(value, "$1xx")
+	value = clusterHexRegex.ReplaceAllString(value, "<hex>")
+	value = clusterNumberRegex.ReplaceAllString(value, "<num>")
+	value = clusterSpaceRegex.ReplaceAllString(value, " ")
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+	return value
+}
+
+func normalizeRouteForCluster(route string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(route))
+	if trimmed == "" {
+		return "/unknown"
+	}
+
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		parsed, err := url.Parse(trimmed)
+		if err == nil && parsed.Path != "" {
+			return normalizePathForCluster(parsed.Path)
+		}
+	}
+
+	return normalizePathForCluster(trimmed)
+}
+
+func normalizeURLForCluster(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return normalizeTextForClusterToken(raw)
+	}
+
+	host := strings.ToLower(parsed.Hostname())
+	normalizedPath := normalizePathForCluster(parsed.Path)
+	if normalizedPath == "" {
+		normalizedPath = "/"
+	}
+	if host == "" {
+		return normalizedPath
+	}
+
+	return host + normalizedPath
+}
+
+func normalizePathForCluster(path string) string {
+	value := strings.TrimSpace(strings.ToLower(path))
+	if value == "" {
+		return "/unknown"
+	}
+
+	if idx := strings.Index(value, "?"); idx >= 0 {
+		value = value[:idx]
+	}
+	if idx := strings.Index(value, "#"); idx >= 0 {
+		value = value[:idx]
+	}
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
+	}
+
+	parts := strings.Split(value, "/")
+	for index, part := range parts {
+		if part == "" {
+			continue
+		}
+
+		normalized := normalizeTextForClusterToken(part)
+		switch {
+		case clusterUUIDRegex.MatchString(normalized):
+			parts[index] = ":id"
+		case clusterHexRegex.MatchString(normalized):
+			parts[index] = ":id"
+		case clusterNumberRegex.MatchString(normalized):
+			parts[index] = ":id"
+		default:
+			parts[index] = normalized
+		}
+	}
+
+	normalizedPath := strings.Join(parts, "/")
+	if normalizedPath == "" {
+		return "/unknown"
+	}
+	return normalizedPath
+}
+
+func normalizeTextForClusterToken(value string) string {
+	token := strings.ToLower(strings.TrimSpace(value))
+	token = clusterTokenRegex.ReplaceAllString(token, "-")
+	token = strings.Trim(token, "-")
+	if token == "" {
+		return "unknown"
+	}
+	return token
 }
 
 func hashAPIKey(rawKey string) string {

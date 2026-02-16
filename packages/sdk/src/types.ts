@@ -18,6 +18,13 @@ export interface RetrospecInitOptions {
   autoFlushMs?: number;
   recordConsole?: boolean;
   recordNetwork?: boolean;
+  detectRageClicks?: boolean;
+  detectFormValidation?: boolean;
+  detectReloadLoops?: boolean;
+  rageClickThreshold?: number;
+  rageClickWindowMs?: number;
+  reloadLoopThreshold?: number;
+  reloadLoopWindowMs?: number;
   debug?: boolean;
 }
 
