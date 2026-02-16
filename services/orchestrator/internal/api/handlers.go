@@ -516,6 +516,9 @@ func (h *Handler) getSessionArtifact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		projectID = claims.ProjectID
+	} else if strings.TrimSpace(h.ingestAPIKey) != "" && !h.keyAuthenticatedFromContext(r.Context()) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
 	}
 
 	session, err := h.loadSession(r.Context(), projectID, sessionID)
