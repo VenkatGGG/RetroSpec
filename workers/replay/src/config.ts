@@ -9,6 +9,8 @@ export interface ReplayWorkerConfig {
   renderMaxDurationMs: number;
   renderViewportWidth: number;
   renderViewportHeight: number;
+  maxAttempts: number;
+  retryBaseMs: number;
   s3Endpoint?: string;
   s3Region: string;
   s3AccessKey: string;
@@ -29,6 +31,8 @@ export function loadConfig(): ReplayWorkerConfig {
     renderMaxDurationMs: envOrDefaultNumber("REPLAY_RENDER_MAX_DURATION_MS", 120_000),
     renderViewportWidth: envOrDefaultNumber("REPLAY_RENDER_VIEWPORT_WIDTH", 1280),
     renderViewportHeight: envOrDefaultNumber("REPLAY_RENDER_VIEWPORT_HEIGHT", 720),
+    maxAttempts: envOrDefaultNumber("REPLAY_MAX_ATTEMPTS", 3),
+    retryBaseMs: envOrDefaultNumber("REPLAY_RETRY_BASE_MS", 2_000),
     s3Endpoint: process.env.S3_ENDPOINT,
     s3Region: process.env.S3_REGION ?? "us-east-1",
     s3AccessKey: process.env.S3_ACCESS_KEY ?? "minioadmin",

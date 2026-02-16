@@ -10,11 +10,13 @@ const replayJobSchema = z.object({
   eventsObjectKey: z.string().min(1),
   markerOffsetsMs: z.array(z.number().int().nonnegative()).min(1),
   triggerKind: z.enum(["api_error", "js_exception", "validation_failed", "ui_no_effect"]),
+  attempt: z.number().int().positive().default(1),
 });
 
 const config = loadConfig();
 const queueName = config.queueName;
 const failedQueueName = `${config.queueName}:failed`;
+const retryQueueName = `${config.queueName}:retry`;
 
 const redis = new Redis({
   host: config.redisHost,
@@ -24,19 +26,45 @@ const redis = new Redis({
 
 let shuttingDown = false;
 
+async function drainRetryQueue(): Promise<void> {
+  const now = Date.now();
+  const due = await redis.zrangebyscore(retryQueueName, 0, now, "LIMIT", 0, 20);
+  if (due.length === 0) {
+    return;
+  }
+
+  const pipeline = redis.multi();
+  for (const item of due) {
+    pipeline.zrem(retryQueueName, item);
+    pipeline.lpush(queueName, item);
+  }
+  await pipeline.exec();
+}
+
+async function enqueueRetry(payload: unknown, attempt: number): Promise<void> {
+  const baseDelay = Math.max(500, Math.floor(config.retryBaseMs));
+  const delayMs = Math.min(120_000, baseDelay * 2 ** Math.max(0, attempt - 1));
+  const runAtMs = Date.now() + delayMs;
+
+  await redis.zadd(retryQueueName, runAtMs, JSON.stringify(payload));
+}
+
 async function workerLoop() {
   console.info(`[replay-worker] listening queue=${queueName}`);
 
   while (!shuttingDown) {
     let rawPayload = "";
+    let parsed: z.infer<typeof replayJobSchema> | null = null;
     try {
+      await drainRetryQueue();
+
       const item = await redis.brpop(queueName, 5);
       if (!item) {
         continue;
       }
 
       rawPayload = item[1];
-      const parsed = replayJobSchema.parse(JSON.parse(rawPayload));
+      parsed = replayJobSchema.parse(JSON.parse(rawPayload));
       const result = await processReplayJob(parsed);
       await reportReplayArtifact(config, {
         projectId: parsed.projectId,
@@ -68,15 +96,25 @@ async function workerLoop() {
       const details = error instanceof Error ? error.message : String(error);
       console.error("[replay-worker] job failed", details);
 
-      // Push malformed or failed payloads to a dead-letter queue for manual inspection.
-      await redis.lpush(
-        failedQueueName,
-        JSON.stringify({
-          failedAt: new Date().toISOString(),
-          error: details,
-          payload: rawPayload,
-        }),
-      );
+      const attempt = parsed?.attempt ?? 1;
+      if (parsed && attempt < Math.max(1, config.maxAttempts)) {
+        const nextAttempt = attempt + 1;
+        await enqueueRetry({ ...parsed, attempt: nextAttempt }, nextAttempt);
+        console.warn(
+          `[replay-worker] scheduled retry session=${parsed.sessionId} attempt=${nextAttempt}`,
+        );
+      } else {
+        // Push malformed or exhausted jobs to a dead-letter queue for manual inspection.
+        await redis.lpush(
+          failedQueueName,
+          JSON.stringify({
+            failedAt: new Date().toISOString(),
+            error: details,
+            attempt,
+            payload: rawPayload,
+          }),
+        );
+      }
     }
   }
 }

@@ -4,6 +4,7 @@ export interface ReplayJobData {
   eventsObjectKey: string;
   markerOffsetsMs: number[];
   triggerKind: "api_error" | "js_exception" | "validation_failed" | "ui_no_effect";
+  attempt?: number;
 }
 
 export interface MarkerWindow {
