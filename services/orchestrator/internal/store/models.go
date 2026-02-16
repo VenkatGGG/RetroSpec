@@ -99,10 +99,13 @@ type SessionArtifact struct {
 }
 
 type CleanupResult struct {
-	DeletedSessions         int      `json:"deletedSessions"`
-	DeletedIssueClusters    int      `json:"deletedIssueClusters"`
-	DeletedEventObjects     int      `json:"deletedEventObjects"`
-	DeletedEventObjectKeys  []string `json:"-"`
-	FailedEventObjectDelete int      `json:"failedEventObjectDelete"`
-	RetentionDays           int      `json:"retentionDays"`
+	DeletedSessions            int      `json:"deletedSessions"`
+	DeletedIssueClusters       int      `json:"deletedIssueClusters"`
+	DeletedEventObjects        int      `json:"deletedEventObjects"`
+	DeletedArtifactObjects     int      `json:"deletedArtifactObjects"`
+	DeletedEventObjectKeys     []string `json:"-"`
+	DeletedArtifactObjectKeys  []string `json:"-"`
+	FailedEventObjectDelete    int      `json:"failedEventObjectDelete"`
+	FailedArtifactObjectDelete int      `json:"failedArtifactObjectDelete"`
+	RetentionDays              int      `json:"retentionDays"`
 }

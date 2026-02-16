@@ -430,21 +430,37 @@ func (p *Postgres) CleanupExpiredData(ctx context.Context, projectID string, ret
 	defer tx.Rollback(ctx)
 
 	var (
-		deletedSessions    int
-		deletedEventObject []string
+		deletedSessions     int
+		deletedEventObject  []string
+		deletedArtifactKeys []string
 	)
 	err = tx.QueryRow(
 		ctx,
-		`WITH deleted AS (
-		   DELETE FROM sessions
+		`WITH target_sessions AS (
+		   SELECT id, events_object_key
+		   FROM sessions
 		   WHERE created_at < NOW() - ($1::text || ' days')::interval
 		     AND project_id = $2
-		   RETURNING events_object_key
+		 ),
+		 target_artifacts AS (
+		   SELECT DISTINCT sa.artifact_key
+		   FROM session_artifacts sa
+		   JOIN target_sessions ts ON ts.id = sa.session_id
+		   WHERE sa.project_id = $2
+		 ),
+		 deleted_sessions AS (
+		   DELETE FROM sessions s
+		   USING target_sessions ts
+		   WHERE s.id = ts.id
+		   RETURNING ts.events_object_key
 		 )
-		 SELECT COUNT(*), COALESCE(array_agg(events_object_key), '{}'::text[]) FROM deleted`,
+		 SELECT
+		   (SELECT COUNT(*) FROM deleted_sessions),
+		   COALESCE((SELECT array_agg(events_object_key) FROM deleted_sessions), '{}'::text[]),
+		   COALESCE((SELECT array_agg(artifact_key) FROM target_artifacts), '{}'::text[])`,
 		retentionDays,
 		projectID,
-	).Scan(&deletedSessions, &deletedEventObject)
+	).Scan(&deletedSessions, &deletedEventObject, &deletedArtifactKeys)
 	if err != nil {
 		return CleanupResult{}, err
 	}
@@ -471,11 +487,13 @@ func (p *Postgres) CleanupExpiredData(ctx context.Context, projectID string, ret
 	}
 
 	return CleanupResult{
-		DeletedSessions:        deletedSessions,
-		DeletedIssueClusters:   int(commandTag.RowsAffected()),
-		DeletedEventObjects:    len(deletedEventObject),
-		DeletedEventObjectKeys: deletedEventObject,
-		RetentionDays:          retentionDays,
+		DeletedSessions:           deletedSessions,
+		DeletedIssueClusters:      int(commandTag.RowsAffected()),
+		DeletedEventObjects:       len(deletedEventObject),
+		DeletedArtifactObjects:    len(deletedArtifactKeys),
+		DeletedEventObjectKeys:    deletedEventObject,
+		DeletedArtifactObjectKeys: deletedArtifactKeys,
+		RetentionDays:             retentionDays,
 	}, nil
 }
 

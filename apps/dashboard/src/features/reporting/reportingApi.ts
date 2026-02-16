@@ -55,7 +55,9 @@ export const reportingApi = createApi({
         deletedSessions: number;
         deletedIssueClusters: number;
         deletedEventObjects: number;
+        deletedArtifactObjects: number;
         failedEventObjectDelete: number;
+        failedArtifactObjectDelete: number;
         retentionDays: number;
       },
       void

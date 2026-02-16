@@ -376,6 +376,13 @@ func (h *Handler) cleanupExpiredData(w http.ResponseWriter, r *http.Request) {
 			log.Printf("failed to delete event object key=%s err=%v", objectKey, err)
 		}
 	}
+	for _, objectKey := range result.DeletedArtifactObjectKeys {
+		err := h.artifactStore.DeleteObject(r.Context(), objectKey)
+		if err != nil && !errors.Is(err, artifacts.ErrNotConfigured) {
+			result.FailedArtifactObjectDelete++
+			log.Printf("failed to delete artifact object key=%s err=%v", objectKey, err)
+		}
+	}
 
 	writeJSON(w, http.StatusOK, result)
 }

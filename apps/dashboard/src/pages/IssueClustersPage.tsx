@@ -25,7 +25,7 @@ export function IssueClustersPage() {
   const handleCleanup = async () => {
     const result = await cleanupData().unwrap();
     setMaintenanceMessage(
-      `Cleanup: ${result.deletedSessions} sessions, ${result.deletedIssueClusters} clusters, ${result.deletedEventObjects} event objects.`,
+      `Cleanup: ${result.deletedSessions} sessions, ${result.deletedIssueClusters} clusters, ${result.deletedEventObjects} event objects, ${result.deletedArtifactObjects} replay artifacts.`,
     );
   };
 
