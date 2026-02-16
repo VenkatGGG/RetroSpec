@@ -31,3 +31,4 @@ go run ./cmd/api
 - Session event payloads are loaded from S3-compatible storage via the configured `S3_*` environment variables.
 - `POST /v1/maintenance/cleanup` removes data older than `SESSION_RETENTION_DAYS` (default 7), prunes orphan issue clusters, and deletes expired event objects from S3 when artifact storage is configured.
 - CORS origins are controlled with `CORS_ALLOWED_ORIGINS` (comma-separated, default `*`) for SDK calls from customer domains.
+- If `INGEST_API_KEY` is set, write endpoints require `X-Retrospec-Key`.

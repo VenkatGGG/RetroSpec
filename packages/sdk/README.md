@@ -15,6 +15,7 @@ import { initRetrospec } from "@retrospec/sdk";
 
 const client = initRetrospec({
   apiBaseUrl: "http://localhost:8080",
+  apiKey: "replace-if-ingest-key-enabled",
   site: "demo-shop.io",
 });
 

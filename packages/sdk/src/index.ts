@@ -79,13 +79,13 @@ export function initRetrospec(options: RetrospecInitOptions): RetrospecClient {
       };
     }
 
-    const eventsObjectKey = await uploadSessionEvents(config.apiBaseUrl, {
+    const eventsObjectKey = await uploadSessionEvents(config.apiBaseUrl, config.apiKey, {
       sessionId: state.sessionId,
       site: config.site,
       events: state.events,
     });
 
-    await ingestSession(config.apiBaseUrl, {
+    await ingestSession(config.apiBaseUrl, config.apiKey, {
       session: {
         id: state.sessionId,
         site: config.site,
@@ -136,11 +136,17 @@ export function initRetrospec(options: RetrospecInitOptions): RetrospecClient {
 
 async function uploadSessionEvents(
   apiBaseUrl: string,
+  apiKey: string | undefined,
   payload: { sessionId: string; site: string; events: eventWithTime[] },
 ): Promise<string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) {
+    headers["X-Retrospec-Key"] = apiKey;
+  }
+
   const response = await fetch(`${apiBaseUrl}/v1/artifacts/session-events`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
   });
 
@@ -154,6 +160,7 @@ async function uploadSessionEvents(
 
 async function ingestSession(
   apiBaseUrl: string,
+  apiKey: string | undefined,
   payload: {
     session: {
       id: string;
@@ -166,9 +173,14 @@ async function ingestSession(
     markers: RetrospecMarker[];
   },
 ): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) {
+    headers["X-Retrospec-Key"] = apiKey;
+  }
+
   const response = await fetch(`${apiBaseUrl}/v1/ingest/session`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
   });
 

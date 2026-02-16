@@ -12,6 +12,7 @@ type Config struct {
 	RedisAddr                 string
 	ReplayQueueName           string
 	CORSAllowedOrigins        []string
+	IngestAPIKey              string
 	SessionRetentionDays      int
 	S3Region                  string
 	S3Endpoint                string
@@ -30,6 +31,7 @@ func Load() Config {
 		RedisAddr:                 redisAddr(),
 		ReplayQueueName:           envOrDefault("REPLAY_QUEUE_NAME", "replay-jobs"),
 		CORSAllowedOrigins:        parseCSV(envOrDefault("CORS_ALLOWED_ORIGINS", "*")),
+		IngestAPIKey:              os.Getenv("INGEST_API_KEY"),
 		SessionRetentionDays:      envOrDefaultInt("SESSION_RETENTION_DAYS", 7),
 		S3Region:                  envOrDefault("S3_REGION", "us-east-1"),
 		S3Endpoint:                os.Getenv("S3_ENDPOINT"),

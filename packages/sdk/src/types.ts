@@ -10,6 +10,7 @@ export interface RetrospecMarker {
 
 export interface RetrospecInitOptions {
   apiBaseUrl: string;
+  apiKey?: string;
   site: string;
   route?: string;
   sampleRate?: number;

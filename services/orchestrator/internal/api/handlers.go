@@ -24,6 +24,7 @@ type Handler struct {
 	artifactStore            artifacts.Store
 	replayProducer           queue.Producer
 	corsAllowedOrigins       []string
+	ingestAPIKey             string
 	store                    *store.Postgres
 	clusterPromoteMinSession int
 	sessionRetentionDays     int
@@ -34,6 +35,7 @@ func NewHandler(
 	replayProducer queue.Producer,
 	artifactStore artifacts.Store,
 	corsAllowedOrigins []string,
+	ingestAPIKey string,
 	clusterPromoteMinSession int,
 	sessionRetentionDays int,
 ) *Handler {
@@ -42,6 +44,7 @@ func NewHandler(
 		replayProducer:           replayProducer,
 		artifactStore:            artifactStore,
 		corsAllowedOrigins:       corsAllowedOrigins,
+		ingestAPIKey:             ingestAPIKey,
 		clusterPromoteMinSession: clusterPromoteMinSession,
 		sessionRetentionDays:     sessionRetentionDays,
 	}
@@ -65,13 +68,13 @@ func (h *Handler) Router() http.Handler {
 
 	r.Get("/healthz", h.healthz)
 	r.Route("/v1", func(r chi.Router) {
-		r.Post("/artifacts/session-events", h.uploadSessionEvents)
-		r.Post("/ingest/session", h.ingestSession)
-		r.Post("/issues/promote", h.promoteIssues)
+		r.With(h.requireIngestAPIKey).Post("/artifacts/session-events", h.uploadSessionEvents)
+		r.With(h.requireIngestAPIKey).Post("/ingest/session", h.ingestSession)
+		r.With(h.requireIngestAPIKey).Post("/issues/promote", h.promoteIssues)
 		r.Get("/issues", h.listIssues)
 		r.Get("/sessions/{sessionID}", h.getSession)
 		r.Get("/sessions/{sessionID}/events", h.getSessionEvents)
-		r.Post("/maintenance/cleanup", h.cleanupExpiredData)
+		r.With(h.requireIngestAPIKey).Post("/maintenance/cleanup", h.cleanupExpiredData)
 	})
 
 	return r
@@ -284,6 +287,23 @@ func strongerTrigger(current, candidate string) string {
 		return candidate
 	}
 	return current
+}
+
+func (h *Handler) requireIngestAPIKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.TrimSpace(h.ingestAPIKey) == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		provided := r.Header.Get("X-Retrospec-Key")
+		if provided == h.ingestAPIKey {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	})
 }
 
 func slugSite(site string) string {
