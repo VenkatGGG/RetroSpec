@@ -1,0 +1,109 @@
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5"
+
+	"retrospec/services/orchestrator/internal/store"
+)
+
+type Handler struct {
+	store                    *store.Postgres
+	clusterPromoteMinSession int
+}
+
+func NewHandler(store *store.Postgres, clusterPromoteMinSession int) *Handler {
+	return &Handler{store: store, clusterPromoteMinSession: clusterPromoteMinSession}
+}
+
+func (h *Handler) Router() http.Handler {
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.Timeout(15 * time.Second))
+
+	r.Get("/healthz", h.healthz)
+	r.Route("/v1", func(r chi.Router) {
+		r.Post("/ingest/session", h.ingestSession)
+		r.Post("/issues/promote", h.promoteIssues)
+		r.Get("/issues", h.listIssues)
+		r.Get("/sessions/{sessionID}", h.getSession)
+	})
+
+	return r
+}
+
+func (h *Handler) healthz(w http.ResponseWriter, r *http.Request) {
+	if err := h.store.Health(r.Context()); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "down"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
+	payload := store.IngestPayload{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	stored, err := h.store.Ingest(r.Context(), payload)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"session": stored,
+	})
+}
+
+func (h *Handler) promoteIssues(w http.ResponseWriter, r *http.Request) {
+	result, err := h.store.PromoteClusters(r.Context(), h.clusterPromoteMinSession)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "promote failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
+	clusters, err := h.store.ListIssueClusters(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"issues": clusters})
+}
+
+func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	session, err := h.store.GetSession(r.Context(), sessionID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"session": session})
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
