@@ -36,6 +36,9 @@ export function IssueClustersPage() {
         Only repeated failures are shown here. A cluster appears when it passes confidence and
         recurrence thresholds.
       </p>
+      <p>
+        <Link to="/admin">Open admin controls</Link>
+      </p>
       <div className="issue-actions">
         <button type="button" onClick={handlePromote} disabled={isPromoting}>
           {isPromoting ? "Promoting..." : "Recompute Clusters"}

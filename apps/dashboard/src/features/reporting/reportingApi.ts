@@ -3,6 +3,7 @@ import type { IssueCluster, SessionSummary } from "../sessions/types";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const ingestApiKey = import.meta.env.VITE_INGEST_API_KEY;
+const adminApiKey = import.meta.env.VITE_ADMIN_API_KEY;
 
 export const reportingApi = createApi({
   reducerPath: "reportingApi",
@@ -11,6 +12,9 @@ export const reportingApi = createApi({
     prepareHeaders: (headers) => {
       if (ingestApiKey) {
         headers.set("X-Retrospec-Key", ingestApiKey);
+      }
+      if (adminApiKey) {
+        headers.set("X-Retrospec-Admin", adminApiKey);
       }
       return headers;
     },
@@ -62,6 +66,34 @@ export const reportingApi = createApi({
       }),
       invalidatesTags: [{ type: "Issue", id: "LIST" }],
     }),
+    createProject: builder.mutation<
+      {
+        project: { id: string; name: string; site: string; createdAt: string };
+        apiKey: string;
+      },
+      { name: string; site: string; label: string }
+    >({
+      query: (payload) => ({
+        url: "/v1/admin/projects",
+        method: "POST",
+        body: payload,
+      }),
+    }),
+    createProjectKey: builder.mutation<
+      {
+        apiKeyId: string;
+        projectId: string;
+        label: string;
+        apiKey: string;
+      },
+      { projectId: string; label: string }
+    >({
+      query: ({ projectId, label }) => ({
+        url: `/v1/admin/projects/${projectId}/keys`,
+        method: "POST",
+        body: { label },
+      }),
+    }),
   }),
 });
 
@@ -71,4 +103,6 @@ export const {
   useGetSessionEventsQuery,
   usePromoteIssuesMutation,
   useCleanupDataMutation,
+  useCreateProjectMutation,
+  useCreateProjectKeyMutation,
 } = reportingApi;

@@ -32,6 +32,57 @@
   opacity: 0.7;
 }
 
+.admin-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  margin-top: 1rem;
+}
+
+.admin-card {
+  background: #101828;
+  border: 1px solid #1f2a44;
+  border-radius: 10px;
+  display: grid;
+  gap: 0.5rem;
+  padding: 1rem;
+}
+
+.admin-card label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.admin-card input {
+  background: #16263f;
+  border: 1px solid #38507b;
+  border-radius: 8px;
+  color: #e3e8f2;
+  padding: 0.5rem 0.65rem;
+}
+
+.admin-card button {
+  background: #1e3a8a;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  color: #eff6ff;
+  cursor: pointer;
+  font-weight: 600;
+  margin-top: 0.35rem;
+  padding: 0.55rem 0.75rem;
+}
+
+.admin-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.admin-result {
+  color: #8ec5ff;
+  font-weight: 600;
+  margin-top: 1rem;
+}
+
 .cluster-card {
   background: #101828;
   border: 1px solid #1f2a44;

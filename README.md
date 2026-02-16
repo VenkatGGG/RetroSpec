@@ -45,6 +45,7 @@ RetroSpec is an async web reliability platform that captures browser session eve
 Set `VITE_API_BASE_URL` to point the dashboard at your orchestrator service (default `http://localhost:8080`).
 If backend write auth is enabled, set `VITE_INGEST_API_KEY` so dashboard actions can call protected endpoints.
 Set `ADMIN_API_KEY` on the orchestrator to enable project/key management endpoints.
+Set `VITE_ADMIN_API_KEY` in the dashboard to use `/admin` controls from the UI.
 
 ## Website Integration (SDK)
 
