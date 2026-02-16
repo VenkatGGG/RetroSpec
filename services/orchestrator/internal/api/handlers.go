@@ -24,6 +24,7 @@ type Handler struct {
 	artifactStore            artifacts.Store
 	replayProducer           queue.Producer
 	corsAllowedOrigins       []string
+	adminAPIKey              string
 	ingestAPIKey             string
 	store                    *store.Postgres
 	clusterPromoteMinSession int
@@ -43,6 +44,7 @@ func NewHandler(
 	replayProducer queue.Producer,
 	artifactStore artifacts.Store,
 	corsAllowedOrigins []string,
+	adminAPIKey string,
 	ingestAPIKey string,
 	clusterPromoteMinSession int,
 	sessionRetentionDays int,
@@ -52,6 +54,7 @@ func NewHandler(
 		replayProducer:           replayProducer,
 		artifactStore:            artifactStore,
 		corsAllowedOrigins:       corsAllowedOrigins,
+		adminAPIKey:              adminAPIKey,
 		ingestAPIKey:             ingestAPIKey,
 		clusterPromoteMinSession: clusterPromoteMinSession,
 		sessionRetentionDays:     sessionRetentionDays,
@@ -76,15 +79,22 @@ func (h *Handler) Router() http.Handler {
 
 	r.Get("/healthz", h.healthz)
 	r.Route("/v1", func(r chi.Router) {
-		r.Use(h.withProjectContext)
+		r.Route("/admin", func(r chi.Router) {
+			r.With(h.requireAdminAccess).Post("/projects", h.createProject)
+			r.With(h.requireAdminAccess).Post("/projects/{projectID}/keys", h.createProjectAPIKey)
+		})
 
-		r.With(h.requireWriteAccess).Post("/artifacts/session-events", h.uploadSessionEvents)
-		r.With(h.requireWriteAccess).Post("/ingest/session", h.ingestSession)
-		r.With(h.requireWriteAccess).Post("/issues/promote", h.promoteIssues)
-		r.Get("/issues", h.listIssues)
-		r.Get("/sessions/{sessionID}", h.getSession)
-		r.Get("/sessions/{sessionID}/events", h.getSessionEvents)
-		r.With(h.requireWriteAccess).Post("/maintenance/cleanup", h.cleanupExpiredData)
+		r.Group(func(r chi.Router) {
+			r.Use(h.withProjectContext)
+
+			r.With(h.requireWriteAccess).Post("/artifacts/session-events", h.uploadSessionEvents)
+			r.With(h.requireWriteAccess).Post("/ingest/session", h.ingestSession)
+			r.With(h.requireWriteAccess).Post("/issues/promote", h.promoteIssues)
+			r.Get("/issues", h.listIssues)
+			r.Get("/sessions/{sessionID}", h.getSession)
+			r.Get("/sessions/{sessionID}/events", h.getSessionEvents)
+			r.With(h.requireWriteAccess).Post("/maintenance/cleanup", h.cleanupExpiredData)
+		})
 	})
 
 	return r
@@ -130,6 +140,76 @@ type uploadSessionEventsRequest struct {
 	SessionID string          `json:"sessionId"`
 	Site      string          `json:"site"`
 	Events    json.RawMessage `json:"events"`
+}
+
+type createProjectRequest struct {
+	Name  string `json:"name"`
+	Site  string `json:"site"`
+	Label string `json:"label"`
+}
+
+func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
+	payload := createProjectRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	name := strings.TrimSpace(payload.Name)
+	site := strings.TrimSpace(payload.Site)
+	label := strings.TrimSpace(payload.Label)
+	if name == "" || site == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and site are required"})
+		return
+	}
+
+	if label == "" {
+		label = "default-key"
+	}
+
+	rawKey := generateRawAPIKey()
+	project, err := h.store.CreateProjectWithAPIKey(r.Context(), name, site, label, rawKey)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "project creation failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"project": project,
+		"apiKey":  rawKey,
+	})
+}
+
+type createProjectAPIKeyRequest struct {
+	Label string `json:"label"`
+}
+
+func (h *Handler) createProjectAPIKey(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectID")
+	payload := createProjectAPIKeyRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	label := strings.TrimSpace(payload.Label)
+	if label == "" {
+		label = "project-key"
+	}
+
+	rawKey := generateRawAPIKey()
+	stored, err := h.store.CreateAPIKeyForProject(r.Context(), projectID, label, rawKey)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "api key creation failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"apiKeyId":  stored.ID,
+		"projectId": stored.ProjectID,
+		"label":     stored.Label,
+		"apiKey":    rawKey,
+	})
 }
 
 func (h *Handler) uploadSessionEvents(w http.ResponseWriter, r *http.Request) {
@@ -348,6 +428,23 @@ func (h *Handler) requireWriteAccess(next http.Handler) http.Handler {
 	})
 }
 
+func (h *Handler) requireAdminAccess(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.TrimSpace(h.adminAPIKey) == "" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin endpoints disabled"})
+			return
+		}
+
+		provided := strings.TrimSpace(r.Header.Get("X-Retrospec-Admin"))
+		if provided == h.adminAPIKey {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	})
+}
+
 func (h *Handler) projectIDFromContext(ctx context.Context) string {
 	value, ok := ctx.Value(projectIDContextKey).(string)
 	if !ok || strings.TrimSpace(value) == "" {
@@ -383,4 +480,8 @@ func slugSite(site string) string {
 		return "unknown-site"
 	}
 	return slug
+}
+
+func generateRawAPIKey() string {
+	return "rpk_" + strings.ReplaceAll(uuid.NewString(), "-", "") + strings.ReplaceAll(uuid.NewString(), "-", "")
 }

@@ -429,6 +429,90 @@ func (p *Postgres) ResolveProjectIDByAPIKey(ctx context.Context, rawKey string) 
 	return projectID, nil
 }
 
+func (p *Postgres) CreateProjectWithAPIKey(
+	ctx context.Context,
+	name,
+	site,
+	label,
+	rawKey string,
+) (Project, error) {
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return Project{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	projectID := "proj_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	project := Project{}
+
+	err = tx.QueryRow(
+		ctx,
+		`INSERT INTO projects (id, name, site)
+		 VALUES ($1, $2, $3)
+		 RETURNING id, name, site, created_at`,
+		projectID,
+		strings.TrimSpace(name),
+		strings.TrimSpace(site),
+	).Scan(&project.ID, &project.Name, &project.Site, &project.CreatedAt)
+	if err != nil {
+		return Project{}, err
+	}
+
+	keyID := "key_" + uuid.NewString()
+	_, err = tx.Exec(
+		ctx,
+		`INSERT INTO project_api_keys (id, project_id, key_hash, label, status)
+		 VALUES ($1, $2, $3, $4, 'active')`,
+		keyID,
+		projectID,
+		hashAPIKey(strings.TrimSpace(rawKey)),
+		strings.TrimSpace(label),
+	)
+	if err != nil {
+		return Project{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Project{}, err
+	}
+
+	return project, nil
+}
+
+func (p *Postgres) CreateAPIKeyForProject(
+	ctx context.Context,
+	projectID,
+	label,
+	rawKey string,
+) (ProjectAPIKey, error) {
+	projectID = normalizeProjectID(projectID)
+	keyID := "key_" + uuid.NewString()
+	stored := ProjectAPIKey{}
+
+	err := p.pool.QueryRow(
+		ctx,
+		`INSERT INTO project_api_keys (id, project_id, key_hash, label, status)
+		 VALUES ($1, $2, $3, $4, 'active')
+		 RETURNING id, project_id, label, status, created_at, last_used_at`,
+		keyID,
+		projectID,
+		hashAPIKey(strings.TrimSpace(rawKey)),
+		strings.TrimSpace(label),
+	).Scan(
+		&stored.ID,
+		&stored.ProjectID,
+		&stored.Label,
+		&stored.Status,
+		&stored.CreatedAt,
+		&stored.LastUsedAt,
+	)
+	if err != nil {
+		return ProjectAPIKey{}, err
+	}
+
+	return stored, nil
+}
+
 func hashAPIKey(rawKey string) string {
 	sum := sha256.Sum256([]byte(rawKey))
 	return hex.EncodeToString(sum[:])

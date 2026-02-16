@@ -5,6 +5,8 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 ## Endpoints
 
 - `GET /healthz`
+- `POST /v1/admin/projects`
+- `POST /v1/admin/projects/{projectID}/keys`
 - `POST /v1/artifacts/session-events`
 - `POST /v1/ingest/session`
 - `POST /v1/issues/promote`
@@ -34,11 +36,12 @@ go run ./cmd/api
 - CORS origins are controlled with `CORS_ALLOWED_ORIGINS` (comma-separated, default `*`) for SDK calls from customer domains.
 - Data is project-scoped. Requests with `X-Retrospec-Key` are mapped to a project via `project_api_keys`.
 - If `INGEST_API_KEY` is set, it remains a valid global write key for the default project.
+- Admin endpoints require `ADMIN_API_KEY` via `X-Retrospec-Admin` and return raw API keys on creation.
 
 ## Project API keys
 
-Create keys by inserting SHA-256 hashes into `project_api_keys`. Example hash command:
+Preferred flow:
 
-```bash
-echo -n \"your_raw_key\" | shasum -a 256
-```
+1. Create a project with `POST /v1/admin/projects`.
+2. Store the returned raw API key and configure SDK/dashboard with that key.
+3. Rotate keys with `POST /v1/admin/projects/{projectID}/keys`.

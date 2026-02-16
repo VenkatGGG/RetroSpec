@@ -69,6 +69,15 @@ type Project struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type ProjectAPIKey struct {
+	ID         string     `json:"id"`
+	ProjectID  string     `json:"projectId"`
+	Label      string     `json:"label"`
+	Status     string     `json:"status"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+}
+
 type CleanupResult struct {
 	DeletedSessions         int      `json:"deletedSessions"`
 	DeletedIssueClusters    int      `json:"deletedIssueClusters"`
