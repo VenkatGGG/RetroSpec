@@ -17,6 +17,7 @@ docker compose up -d
 
 ```bash
 psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/orchestrator/db/migrations/001_init.sql
+psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/orchestrator/db/migrations/002_issue_cluster_representative_session.sql
 ```
 
 ## Stop
