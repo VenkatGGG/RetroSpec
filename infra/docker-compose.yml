@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: retrospec-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: retrospec
+      POSTGRES_PASSWORD: retrospec
+      POSTGRES_DB: retrospec
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: retrospec-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    container_name: retrospec-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: retrospec-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      chmod +x /scripts/create-bucket.sh &&
+      /scripts/create-bucket.sh
+      "
+    volumes:
+      - ./minio/create-bucket.sh:/scripts/create-bucket.sh:ro
+
+volumes:
+  postgres_data:
+  minio_data:

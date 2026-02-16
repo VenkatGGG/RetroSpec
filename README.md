@@ -29,7 +29,10 @@ RetroSpec is an async web reliability platform that captures browser session eve
 
 1. Copy `.env.example` to `.env` and set values.
 2. Start local infra from `infra/docker-compose.yml`.
-3. Start services:
+3. Apply schema migration:
+   - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/001_init.sql`
+4. Start services:
    - `npm install`
-   - `npm run dev`
-
+   - `npm run dev -w apps/dashboard`
+   - `go run ./services/orchestrator/cmd/api`
+   - `npm run dev -w workers/replay`
