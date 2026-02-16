@@ -18,6 +18,8 @@ export interface SessionSummary {
   route: string;
   startedAt: string;
   durationMs: number;
+  eventsObjectKey?: string;
+  createdAt?: string;
   markers: ErrorMarker[];
 }
 
@@ -26,13 +28,11 @@ export interface IssueCluster {
   symptom: string;
   sessionCount: number;
   userCount: number;
+  confidence: number;
   lastSeenAt: string;
   representativeSessionId: string;
 }
 
 export interface SessionsState {
-  sessions: SessionSummary[];
-  issueClusters: IssueCluster[];
-  activeSessionId: string | null;
   activeMarkerId: string | null;
 }

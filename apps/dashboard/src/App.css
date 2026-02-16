@@ -10,6 +10,28 @@
   margin-top: 1rem;
 }
 
+.issue-actions {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.issue-actions button {
+  background: #1e3a8a;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  color: #eff6ff;
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+}
+
+.issue-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 .cluster-card {
   background: #101828;
   border: 1px solid #1f2a44;

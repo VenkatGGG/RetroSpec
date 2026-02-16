@@ -1,37 +1,26 @@
-import { useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "../app/hooks";
-import {
-  selectActiveMarkerId,
-  selectActiveSession,
-  selectSessions,
-} from "../features/sessions/selectors";
-import { setActiveMarker, setActiveSession } from "../features/sessions/sessionSlice";
+import { selectActiveMarkerId } from "../features/sessions/selectors";
+import { setActiveMarker } from "../features/sessions/sessionSlice";
 import { ReplayCanvas } from "../components/ReplayCanvas";
+import { useGetSessionQuery } from "../features/reporting/reportingApi";
 import type { ErrorMarker } from "../features/sessions/types";
 
 export function SessionReplayPage() {
   const { sessionId } = useParams();
   const dispatch = useAppDispatch();
-  const sessions = useAppSelector(selectSessions);
-  const activeSession = useAppSelector(selectActiveSession);
   const activeMarkerId = useAppSelector(selectActiveMarkerId);
-
-  useEffect(() => {
-    if (!sessionId || activeSession?.id === sessionId) {
-      return;
-    }
-
-    const found = sessions.find((session) => session.id === sessionId);
-    if (found) {
-      dispatch(setActiveSession(found.id));
-    }
-  }, [activeSession?.id, dispatch, sessionId, sessions]);
+  const {
+    data: activeSession,
+    isLoading,
+    isError,
+  } = useGetSessionQuery(sessionId ?? "", { skip: !sessionId });
 
   if (!activeSession) {
     return (
       <section>
-        <p>Session not found.</p>
+        {isLoading && <p>Loading session replay...</p>}
+        {isError && <p>Session not found.</p>}
         <Link to="/">Return to issues</Link>
       </section>
     );

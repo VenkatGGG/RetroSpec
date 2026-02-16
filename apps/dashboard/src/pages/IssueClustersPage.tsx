@@ -1,11 +1,18 @@
 import { Link } from "react-router-dom";
-import { useAppDispatch, useAppSelector } from "../app/hooks";
-import { selectClusters } from "../features/sessions/selectors";
-import { setActiveSession } from "../features/sessions/sessionSlice";
+import { usePromoteIssuesMutation, useGetIssuesQuery } from "../features/reporting/reportingApi";
 
 export function IssueClustersPage() {
-  const clusters = useAppSelector(selectClusters);
-  const dispatch = useAppDispatch();
+  const {
+    data: clusters = [],
+    isLoading,
+    isFetching,
+    isError,
+  } = useGetIssuesQuery();
+  const [promoteIssues, { isLoading: isPromoting }] = usePromoteIssuesMutation();
+
+  const handlePromote = async () => {
+    await promoteIssues();
+  };
 
   return (
     <section>
@@ -14,6 +21,17 @@ export function IssueClustersPage() {
         Only repeated failures are shown here. A cluster appears when it passes confidence and
         recurrence thresholds.
       </p>
+      <div className="issue-actions">
+        <button type="button" onClick={handlePromote} disabled={isPromoting}>
+          {isPromoting ? "Promoting..." : "Recompute Clusters"}
+        </button>
+        {isFetching && <span>Refreshing...</span>}
+      </div>
+      {isLoading && <p>Loading issue clusters...</p>}
+      {isError && <p>Unable to load issues. Check API connectivity.</p>}
+      {!isLoading && !isError && clusters.length === 0 && (
+        <p>No promoted clusters yet. Trigger promotion after ingesting sessions.</p>
+      )}
 
       <div className="cluster-grid">
         {clusters.map((cluster) => (
@@ -29,12 +47,10 @@ export function IssueClustersPage() {
             <p>
               <strong>Last Seen:</strong> {new Date(cluster.lastSeenAt).toLocaleString()}
             </p>
-            <Link
-              to={`/sessions/${cluster.representativeSessionId}`}
-              onClick={() => dispatch(setActiveSession(cluster.representativeSessionId))}
-            >
-              Open representative replay
-            </Link>
+            <p>
+              <strong>Confidence:</strong> {cluster.confidence.toFixed(2)}
+            </p>
+            <Link to={`/sessions/${cluster.representativeSessionId}`}>Open representative replay</Link>
           </article>
         ))}
       </div>
