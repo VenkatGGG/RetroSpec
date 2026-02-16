@@ -12,7 +12,8 @@ interface InternalState {
   startedAt: Date;
   events: eventWithTime[];
   markers: RetrospecMarker[];
-  flushed: boolean;
+  lastFlushedMarkerCount: number;
+  lastFlushedEventTimestamp: number;
 }
 
 const DEFAULTS = {
@@ -40,7 +41,8 @@ export function initRetrospec(options: RetrospecInitOptions): RetrospecClient {
     startedAt: new Date(),
     events: [],
     markers: [],
-    flushed: false,
+    lastFlushedMarkerCount: 0,
+    lastFlushedEventTimestamp: 0,
   };
 
   const stopRecording = record({
@@ -63,6 +65,14 @@ export function initRetrospec(options: RetrospecInitOptions): RetrospecClient {
     cleanupFns.push(instrumentFetchFailures(state));
   }
 
+  const onPageHide = () => {
+    void flush();
+  };
+  window.addEventListener("pagehide", onPageHide);
+  cleanupFns.push(() => {
+    window.removeEventListener("pagehide", onPageHide);
+  });
+
   let autoFlushTimer: number | undefined;
   if (config.autoFlushMs > 0) {
     autoFlushTimer = window.setInterval(() => {
@@ -71,7 +81,18 @@ export function initRetrospec(options: RetrospecInitOptions): RetrospecClient {
   }
 
   const flush = async (): Promise<FlushResult> => {
-    if (state.flushed || state.events.length === 0) {
+    if (state.events.length === 0) {
+      return {
+        sessionId: state.sessionId,
+        eventsObjectKey: null,
+        ingestAccepted: false,
+      };
+    }
+
+    const latestEventTimestamp = state.events[state.events.length - 1]?.timestamp ?? 0;
+    const hasNewEvents = latestEventTimestamp > state.lastFlushedEventTimestamp;
+    const hasNewMarkers = state.markers.length > state.lastFlushedMarkerCount;
+    if (!hasNewEvents && !hasNewMarkers) {
       return {
         sessionId: state.sessionId,
         eventsObjectKey: null,
@@ -84,6 +105,7 @@ export function initRetrospec(options: RetrospecInitOptions): RetrospecClient {
       site: config.site,
       events: state.events,
     });
+    const newMarkers = state.markers.slice(state.lastFlushedMarkerCount);
 
     await ingestSession(config.apiBaseUrl, config.apiKey, {
       session: {
@@ -94,10 +116,11 @@ export function initRetrospec(options: RetrospecInitOptions): RetrospecClient {
         durationMs: Date.now() - state.startedAt.getTime(),
         eventsObjectKey,
       },
-      markers: state.markers,
+      markers: newMarkers,
     });
 
-    state.flushed = true;
+    state.lastFlushedEventTimestamp = latestEventTimestamp;
+    state.lastFlushedMarkerCount = state.markers.length;
 
     if (config.debug) {
       // eslint-disable-next-line no-console
@@ -106,6 +129,7 @@ export function initRetrospec(options: RetrospecInitOptions): RetrospecClient {
         eventsObjectKey,
         events: state.events.length,
         markers: state.markers.length,
+        markersSent: newMarkers.length,
       });
     }
 

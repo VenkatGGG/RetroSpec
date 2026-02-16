@@ -29,5 +29,6 @@ window.addEventListener("beforeunload", () => {
 1. Capture DOM events with rrweb.
 2. Upload session event payloads to `POST /v1/artifacts/session-events`.
 3. Submit metadata + markers to `POST /v1/ingest/session`.
+4. Auto-flush incremental updates periodically and on `pagehide`.
 
 Use a project-specific `apiKey` generated from `POST /v1/admin/projects` for multi-tenant isolation.
