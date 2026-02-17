@@ -43,7 +43,12 @@ func (p *RedisProducer) EnqueueReplayJob(ctx context.Context, job ReplayJob) err
 		return err
 	}
 
-	if err := p.client.LPush(ctx, p.replayQueueName, payload).Err(); err != nil {
+	if err := p.client.XAdd(ctx, &redis.XAddArgs{
+		Stream: p.replayQueueName,
+		Values: map[string]any{
+			"payload": string(payload),
+		},
+	}).Err(); err != nil {
 		return fmt.Errorf("enqueue replay job: %w", err)
 	}
 	return nil
@@ -55,7 +60,12 @@ func (p *RedisProducer) EnqueueAnalysisJob(ctx context.Context, job AnalysisJob)
 		return err
 	}
 
-	if err := p.client.LPush(ctx, p.analysisQueueName, payload).Err(); err != nil {
+	if err := p.client.XAdd(ctx, &redis.XAddArgs{
+		Stream: p.analysisQueueName,
+		Values: map[string]any{
+			"payload": string(payload),
+		},
+	}).Err(); err != nil {
 		return fmt.Errorf("enqueue analysis job: %w", err)
 	}
 	return nil
