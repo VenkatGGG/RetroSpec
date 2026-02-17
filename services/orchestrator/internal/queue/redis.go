@@ -89,11 +89,11 @@ func (p *RedisProducer) Close() error {
 
 func (p *RedisProducer) ensureStreamQueues(ctx context.Context) error {
 	p.ensureMu.Lock()
+	defer p.ensureMu.Unlock()
+
 	if p.queuesEnsured {
-		p.ensureMu.Unlock()
 		return nil
 	}
-	p.ensureMu.Unlock()
 
 	if err := p.ensureStreamQueue(ctx, p.replayQueueName); err != nil {
 		return fmt.Errorf("ensure replay queue stream: %w", err)
@@ -102,9 +102,7 @@ func (p *RedisProducer) ensureStreamQueues(ctx context.Context) error {
 		return fmt.Errorf("ensure analysis queue stream: %w", err)
 	}
 
-	p.ensureMu.Lock()
 	p.queuesEnsured = true
-	p.ensureMu.Unlock()
 	return nil
 }
 
