@@ -185,7 +185,7 @@ func (p *RedisProducer) RedriveDeadLetters(ctx context.Context, queueKind DeadLe
 	return result, nil
 }
 
-func (p *RedisProducer) ListDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, limit int) (DeadLetterListResult, error) {
+func (p *RedisProducer) ListDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, offset int, limit int) (DeadLetterListResult, error) {
 	if err := p.ensureStreamQueues(ctx); err != nil {
 		return DeadLetterListResult{}, err
 	}
@@ -202,9 +202,18 @@ func (p *RedisProducer) ListDeadLetters(ctx context.Context, queueKind DeadLette
 	if normalizedLimit > 200 {
 		normalizedLimit = 200
 	}
+	normalizedOffset := offset
+	if normalizedOffset < 0 {
+		normalizedOffset = 0
+	}
 
 	failedKey := queueName + ":failed"
-	rows, err := p.client.LRange(ctx, failedKey, 0, int64(normalizedLimit-1)).Result()
+	rows, err := p.client.LRange(
+		ctx,
+		failedKey,
+		int64(normalizedOffset),
+		int64(normalizedOffset+normalizedLimit-1),
+	).Result()
 	if err != nil && err != redis.Nil {
 		return DeadLetterListResult{}, fmt.Errorf("list dead-letter entries: %w", err)
 	}
@@ -235,6 +244,7 @@ func (p *RedisProducer) ListDeadLetters(ctx context.Context, queueKind DeadLette
 
 	return DeadLetterListResult{
 		QueueKind:  queueKind,
+		Offset:     normalizedOffset,
 		Limit:      normalizedLimit,
 		Total:      total,
 		Entries:    entries,

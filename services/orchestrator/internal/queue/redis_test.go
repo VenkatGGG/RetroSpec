@@ -337,12 +337,12 @@ func TestRedisProducerListDeadLetters(t *testing.T) {
 		t.Fatalf("seed unparsable replay entry: %v", err)
 	}
 
-	result, err := producer.ListDeadLetters(ctx, DeadLetterQueueReplay, 10)
+	result, err := producer.ListDeadLetters(ctx, DeadLetterQueueReplay, 0, 10)
 	if err != nil {
 		t.Fatalf("list dead-letters failed: %v", err)
 	}
 
-	if result.QueueKind != DeadLetterQueueReplay || result.Limit != 10 || result.Total != 2 || result.Unparsable != 1 {
+	if result.QueueKind != DeadLetterQueueReplay || result.Offset != 0 || result.Limit != 10 || result.Total != 2 || result.Unparsable != 1 {
 		t.Fatalf("unexpected list result summary: %+v", result)
 	}
 	if len(result.Entries) != 2 {
@@ -354,6 +354,17 @@ func TestRedisProducerListDeadLetters(t *testing.T) {
 	}
 	if result.Entries[1].SessionID != "session-old" || result.Entries[1].TriggerKind != "js_exception" {
 		t.Fatalf("unexpected second entry metadata: %+v", result.Entries[1])
+	}
+
+	pagedResult, err := producer.ListDeadLetters(ctx, DeadLetterQueueReplay, 1, 1)
+	if err != nil {
+		t.Fatalf("list dead-letters page failed: %v", err)
+	}
+	if pagedResult.Offset != 1 || pagedResult.Limit != 1 || len(pagedResult.Entries) != 1 {
+		t.Fatalf("unexpected paged result summary: %+v", pagedResult)
+	}
+	if pagedResult.Entries[0].SessionID != "session-old" {
+		t.Fatalf("expected second row on page offset=1, got %+v", pagedResult.Entries[0])
 	}
 }
 

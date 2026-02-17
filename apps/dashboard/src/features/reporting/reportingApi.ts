@@ -57,6 +57,7 @@ export interface QueueDeadLetterEntry {
 
 export interface QueueDeadLetterListResult {
   queueKind: "replay" | "analysis";
+  offset: number;
   limit: number;
   total: number;
   unparsable: number;
@@ -391,11 +392,14 @@ export const reportingApi = createApi({
     }),
     getQueueDeadLetters: builder.query<
       QueueDeadLetterListResult,
-      { queue: "replay" | "analysis"; limit?: number }
+      { queue: "replay" | "analysis"; offset?: number; limit?: number }
     >({
-      query: ({ queue, limit }) => {
+      query: ({ queue, offset, limit }) => {
         const query = new URLSearchParams();
         query.set("queue", queue);
+        if (typeof offset === "number") {
+          query.set("offset", String(offset));
+        }
         if (typeof limit === "number") {
           query.set("limit", String(limit));
         }

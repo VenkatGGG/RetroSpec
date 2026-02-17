@@ -536,11 +536,23 @@ func (h *Handler) getQueueDeadLetters(w http.ResponseWriter, r *http.Request) {
 	if limit > 200 {
 		limit = 200
 	}
+	offset := 0
+	if value := strings.TrimSpace(r.URL.Query().Get("offset")); value != "" {
+		parsedOffset, err := strconv.Atoi(value)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "offset must be an integer"})
+			return
+		}
+		offset = parsedOffset
+	}
+	if offset < 0 {
+		offset = 0
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 
-	result, err := h.queueDeadLetterInspector.ListDeadLetters(ctx, queueKind, limit)
+	result, err := h.queueDeadLetterInspector.ListDeadLetters(ctx, queueKind, offset, limit)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "dead-letter lookup failed"})
 		return

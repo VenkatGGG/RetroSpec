@@ -19,6 +19,7 @@ export function AdminPage() {
   const [newKeyLabel, setNewKeyLabel] = useState("rotation-key");
   const [deadLetterQueue, setDeadLetterQueue] = useState<"replay" | "analysis">("replay");
   const [deadLetterLimit, setDeadLetterLimit] = useState("20");
+  const [deadLetterOffset, setDeadLetterOffset] = useState(0);
   const [redriveLimit, setRedriveLimit] = useState("25");
   const [resultMessage, setResultMessage] = useState("");
 
@@ -45,6 +46,7 @@ export function AdminPage() {
   } = useGetQueueDeadLettersQuery(
     {
       queue: deadLetterQueue,
+      offset: deadLetterOffset,
       limit: normalizedDeadLetterLimit,
     },
     {
@@ -57,6 +59,10 @@ export function AdminPage() {
     useRedriveQueueDeadLettersMutation();
   const [purgeQueueDeadLetters, { isLoading: isPurgingQueue }] =
     usePurgeQueueDeadLettersMutation();
+
+  const hasOlderDeadLetterEntries =
+    deadLetters ? deadLetterOffset + deadLetters.entries.length < deadLetters.total : false;
+  const hasNewerDeadLetterEntries = deadLetterOffset > 0;
 
   const handleCreateProject = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -202,9 +208,10 @@ export function AdminPage() {
               <select
                 id="dead-letter-queue-kind"
                 value={deadLetterQueue}
-                onChange={(event) =>
-                  setDeadLetterQueue(event.target.value === "analysis" ? "analysis" : "replay")
-                }
+                onChange={(event) => {
+                  setDeadLetterQueue(event.target.value === "analysis" ? "analysis" : "replay");
+                  setDeadLetterOffset(0);
+                }}
               >
                 <option value="replay">Replay</option>
                 <option value="analysis">Analysis</option>
@@ -216,7 +223,10 @@ export function AdminPage() {
                 min={1}
                 max={200}
                 value={deadLetterLimit}
-                onChange={(event) => setDeadLetterLimit(event.target.value)}
+                onChange={(event) => {
+                  setDeadLetterLimit(event.target.value);
+                  setDeadLetterOffset(0);
+                }}
               />
               <button
                 type="button"
@@ -239,6 +249,20 @@ export function AdminPage() {
               >
                 {isPurgingQueue ? "Purging..." : "Purge unparsable"}
               </button>
+              <button
+                type="button"
+                onClick={() => setDeadLetterOffset((current) => Math.max(0, current - normalizedDeadLetterLimit))}
+                disabled={!hasNewerDeadLetterEntries || isDeadLettersFetching}
+              >
+                Newer
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeadLetterOffset((current) => current + normalizedDeadLetterLimit)}
+                disabled={!hasOlderDeadLetterEntries || isDeadLettersFetching}
+              >
+                Older
+              </button>
             </div>
             {isDeadLettersLoading && <p>Loading dead-letter entries...</p>}
             {isDeadLettersError && <p>Dead-letter entries unavailable. Verify admin auth and Redis.</p>}
@@ -247,7 +271,7 @@ export function AdminPage() {
                 <p>
                   Showing {deadLetters.entries.length} of {deadLetters.total} dead-letter entries
                   for <strong>{deadLetters.queueKind}</strong> queue. Unparsable backlog:{" "}
-                  {deadLetters.unparsable}.
+                  {deadLetters.unparsable}. Window offset: {deadLetters.offset}.
                 </p>
                 {deadLetters.entries.length === 0 && (
                   <p className="replay-status">No dead-letter entries for this queue.</p>

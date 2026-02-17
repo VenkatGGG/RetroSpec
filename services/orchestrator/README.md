@@ -53,7 +53,7 @@ go run ./cmd/api
 - `POST /v1/ingest/session` can auto-promote clusters immediately when `AUTO_PROMOTE_ON_INGEST=true`.
 - `GET /v1/issues/{clusterKey}/sessions` returns the recent sessions mapped to a promoted cluster key, including report-card status/confidence.
   - Query params: `limit` (1-200), `reportStatus` (`pending|ready|failed|discarded`), `minConfidence` (0-1).
-- `GET /v1/admin/queue-dead-letters` accepts query params `queue=replay|analysis` and optional `limit` (1-200) for recent dead-letter payload inspection.
+- `GET /v1/admin/queue-dead-letters` accepts query params `queue=replay|analysis`, optional `offset` (>=0), and optional `limit` (1-200) for dead-letter payload inspection pagination.
 - `POST /v1/admin/queue-dead-letters/purge` accepts `{ "queue": "replay|analysis", "scope": "failed|unprocessable", "limit": 25 }` and removes up to `limit` entries from the selected dead-letter scope.
 - `POST /v1/admin/queue-redrive` accepts `{ "queue": "replay|analysis", "limit": 25 }` and moves up to `limit` dead-letter payloads back to the Redis stream.
 - `GET /v1/issues` supports optional `state` filter: `active|open|acknowledged|resolved|muted`.

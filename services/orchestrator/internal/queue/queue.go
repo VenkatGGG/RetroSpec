@@ -62,6 +62,7 @@ type DeadLetterEntry struct {
 
 type DeadLetterListResult struct {
 	QueueKind  DeadLetterQueueKind `json:"queueKind"`
+	Offset     int                 `json:"offset"`
 	Limit      int                 `json:"limit"`
 	Total      int64               `json:"total"`
 	Entries    []DeadLetterEntry   `json:"entries"`
@@ -98,7 +99,7 @@ type DeadLetterRedriver interface {
 }
 
 type DeadLetterInspector interface {
-	ListDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, limit int) (DeadLetterListResult, error)
+	ListDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, offset int, limit int) (DeadLetterListResult, error)
 }
 
 type DeadLetterPurger interface {
@@ -134,9 +135,10 @@ func (p *NoopProducer) RedriveDeadLetters(_ context.Context, queueKind DeadLette
 	}, nil
 }
 
-func (p *NoopProducer) ListDeadLetters(_ context.Context, queueKind DeadLetterQueueKind, limit int) (DeadLetterListResult, error) {
+func (p *NoopProducer) ListDeadLetters(_ context.Context, queueKind DeadLetterQueueKind, offset int, limit int) (DeadLetterListResult, error) {
 	return DeadLetterListResult{
 		QueueKind: queueKind,
+		Offset:    offset,
 		Limit:     limit,
 	}, nil
 }

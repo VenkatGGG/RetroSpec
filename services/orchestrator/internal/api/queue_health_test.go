@@ -44,11 +44,13 @@ type stubQueueDeadLetterInspector struct {
 	result    queue.DeadLetterListResult
 	err       error
 	queueKind queue.DeadLetterQueueKind
+	offset    int
 	limit     int
 }
 
-func (s *stubQueueDeadLetterInspector) ListDeadLetters(_ context.Context, queueKind queue.DeadLetterQueueKind, limit int) (queue.DeadLetterListResult, error) {
+func (s *stubQueueDeadLetterInspector) ListDeadLetters(_ context.Context, queueKind queue.DeadLetterQueueKind, offset int, limit int) (queue.DeadLetterListResult, error) {
 	s.queueKind = queueKind
+	s.offset = offset
 	s.limit = limit
 	if s.err != nil {
 		return queue.DeadLetterListResult{}, s.err
@@ -316,6 +318,7 @@ func TestGetQueueDeadLettersSuccess(t *testing.T) {
 	inspector := &stubQueueDeadLetterInspector{
 		result: queue.DeadLetterListResult{
 			QueueKind: queue.DeadLetterQueueReplay,
+			Offset:    10,
 			Limit:     10,
 			Total:     12,
 			Entries: []queue.DeadLetterEntry{
@@ -335,7 +338,7 @@ func TestGetQueueDeadLettersSuccess(t *testing.T) {
 	handler := &Handler{
 		queueDeadLetterInspector: inspector,
 	}
-	request := httptest.NewRequest(http.MethodGet, "/v1/admin/queue-dead-letters?queue=replay&limit=10", nil)
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/queue-dead-letters?queue=replay&offset=10&limit=10", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.getQueueDeadLetters(recorder, request)
@@ -348,6 +351,9 @@ func TestGetQueueDeadLettersSuccess(t *testing.T) {
 	}
 	if inspector.limit != 10 {
 		t.Fatalf("expected limit=10, got %d", inspector.limit)
+	}
+	if inspector.offset != 10 {
+		t.Fatalf("expected offset=10, got %d", inspector.offset)
 	}
 
 	var body struct {
