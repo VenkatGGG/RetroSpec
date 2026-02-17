@@ -465,6 +465,408 @@ func (p *Postgres) IssueClusterExists(
 	return exists, nil
 }
 
+func (p *Postgres) RecordIssueFeedback(
+	ctx context.Context,
+	projectID string,
+	clusterKey string,
+	sessionID string,
+	feedbackKind string,
+	note string,
+	metadata map[string]any,
+	createdBy string,
+) (IssueFeedbackEvent, error) {
+	projectID = normalizeProjectID(projectID)
+	clusterKey = strings.TrimSpace(clusterKey)
+	sessionID = strings.TrimSpace(sessionID)
+	feedbackKind = normalizeIssueFeedbackKind(feedbackKind)
+	note = strings.TrimSpace(note)
+	createdBy = strings.TrimSpace(createdBy)
+	if createdBy == "" {
+		createdBy = "dashboard"
+	}
+
+	if clusterKey == "" {
+		return IssueFeedbackEvent{}, fmt.Errorf("clusterKey is required")
+	}
+	if feedbackKind == "" {
+		return IssueFeedbackEvent{}, fmt.Errorf("feedbackKind is invalid")
+	}
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return IssueFeedbackEvent{}, err
+	}
+
+	eventID := "feedback_" + uuid.NewString()
+	stored := IssueFeedbackEvent{}
+	scanMetadata := []byte{}
+	err = p.pool.QueryRow(
+		ctx,
+		`INSERT INTO issue_feedback_events (
+		   id, project_id, cluster_key, session_id, feedback_kind, note, metadata, created_by
+		 )
+		 VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7::jsonb, $8)
+		 RETURNING id, project_id, cluster_key, COALESCE(session_id, ''), feedback_kind, note, metadata, created_by, created_at`,
+		eventID,
+		projectID,
+		clusterKey,
+		sessionID,
+		feedbackKind,
+		note,
+		string(metadataJSON),
+		createdBy,
+	).Scan(
+		&stored.ID,
+		&stored.ProjectID,
+		&stored.ClusterKey,
+		&stored.SessionID,
+		&stored.FeedbackKind,
+		&stored.Note,
+		&scanMetadata,
+		&stored.CreatedBy,
+		&stored.CreatedAt,
+	)
+	if err != nil {
+		return IssueFeedbackEvent{}, err
+	}
+
+	stored.Metadata = map[string]any{}
+	if len(scanMetadata) > 0 {
+		if err := json.Unmarshal(scanMetadata, &stored.Metadata); err != nil {
+			return IssueFeedbackEvent{}, err
+		}
+	}
+	return stored, nil
+}
+
+func (p *Postgres) ListIssueFeedback(
+	ctx context.Context,
+	projectID string,
+	clusterKey string,
+	limit int,
+) ([]IssueFeedbackEvent, error) {
+	projectID = normalizeProjectID(projectID)
+	clusterKey = strings.TrimSpace(clusterKey)
+	if clusterKey == "" {
+		return []IssueFeedbackEvent{}, nil
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	rows, err := p.pool.Query(
+		ctx,
+		`SELECT id, project_id, cluster_key, COALESCE(session_id, ''), feedback_kind, note, metadata, created_by, created_at
+		 FROM issue_feedback_events
+		 WHERE project_id = $1
+		   AND cluster_key = $2
+		 ORDER BY created_at DESC
+		 LIMIT $3`,
+		projectID,
+		clusterKey,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	events := make([]IssueFeedbackEvent, 0)
+	for rows.Next() {
+		var (
+			event    IssueFeedbackEvent
+			metadata []byte
+		)
+		if err := rows.Scan(
+			&event.ID,
+			&event.ProjectID,
+			&event.ClusterKey,
+			&event.SessionID,
+			&event.FeedbackKind,
+			&event.Note,
+			&metadata,
+			&event.CreatedBy,
+			&event.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		event.Metadata = map[string]any{}
+		if len(metadata) > 0 {
+			if err := json.Unmarshal(metadata, &event.Metadata); err != nil {
+				return nil, err
+			}
+		}
+		events = append(events, event)
+	}
+	if rows.Err() != nil {
+		return nil, rows.Err()
+	}
+
+	return events, nil
+}
+
+func (p *Postgres) MergeIssueClusters(
+	ctx context.Context,
+	projectID string,
+	targetClusterKey string,
+	sourceClusterKeys []string,
+	minSessions int,
+) (MergeIssueClustersResult, error) {
+	projectID = normalizeProjectID(projectID)
+	targetClusterKey = strings.TrimSpace(targetClusterKey)
+	if targetClusterKey == "" {
+		return MergeIssueClustersResult{}, fmt.Errorf("targetClusterKey is required")
+	}
+
+	dedupedSource := uniqueTrimmedText(sourceClusterKeys)
+	source := make([]string, 0, len(dedupedSource))
+	for _, key := range dedupedSource {
+		if key == targetClusterKey {
+			continue
+		}
+		source = append(source, key)
+	}
+	if len(source) == 0 {
+		return MergeIssueClustersResult{}, fmt.Errorf("sourceClusterKeys must include at least one key different from target")
+	}
+	if minSessions < 1 {
+		minSessions = 1
+	}
+
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return MergeIssueClustersResult{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	markerUpdate, err := tx.Exec(
+		ctx,
+		`UPDATE error_markers em
+		 SET cluster_key = $3
+		 FROM sessions s
+		 WHERE em.session_id = s.id
+		   AND s.project_id = $1
+		   AND em.cluster_key = ANY($2::text[])`,
+		projectID,
+		source,
+		targetClusterKey,
+	)
+	if err != nil {
+		return MergeIssueClustersResult{}, err
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`UPDATE issue_feedback_events
+		 SET cluster_key = $3
+		 WHERE project_id = $1
+		   AND cluster_key = ANY($2::text[])`,
+		projectID,
+		source,
+		targetClusterKey,
+	)
+	if err != nil {
+		return MergeIssueClustersResult{}, err
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`DELETE FROM issue_cluster_states
+		 WHERE project_id = $1
+		   AND cluster_key = ANY($2::text[])`,
+		projectID,
+		source,
+	)
+	if err != nil {
+		return MergeIssueClustersResult{}, err
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`DELETE FROM issue_clusters
+		 WHERE project_id = $1
+		   AND key = ANY($2::text[])`,
+		projectID,
+		source,
+	)
+	if err != nil {
+		return MergeIssueClustersResult{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return MergeIssueClustersResult{}, err
+	}
+
+	if _, err := p.PromoteClusters(ctx, projectID, minSessions); err != nil {
+		return MergeIssueClustersResult{}, err
+	}
+	if _, err := p.pruneOrphanIssueClusters(ctx, projectID); err != nil {
+		return MergeIssueClustersResult{}, err
+	}
+
+	targetCluster, err := p.findIssueClusterByKey(ctx, projectID, targetClusterKey)
+	if err != nil {
+		return MergeIssueClustersResult{}, err
+	}
+
+	return MergeIssueClustersResult{
+		TargetClusterKey:  targetClusterKey,
+		SourceClusterKeys: source,
+		MovedMarkerCount:  int(markerUpdate.RowsAffected()),
+		TargetCluster:     targetCluster,
+	}, nil
+}
+
+func (p *Postgres) SplitIssueCluster(
+	ctx context.Context,
+	projectID string,
+	sourceClusterKey string,
+	newClusterKey string,
+	sessionIDs []string,
+	minSessions int,
+) (SplitIssueClusterResult, error) {
+	projectID = normalizeProjectID(projectID)
+	sourceClusterKey = strings.TrimSpace(sourceClusterKey)
+	newClusterKey = strings.TrimSpace(newClusterKey)
+	if sourceClusterKey == "" || newClusterKey == "" {
+		return SplitIssueClusterResult{}, fmt.Errorf("sourceClusterKey and newClusterKey are required")
+	}
+	if sourceClusterKey == newClusterKey {
+		return SplitIssueClusterResult{}, fmt.Errorf("newClusterKey must differ from sourceClusterKey")
+	}
+
+	sessionIDs = uniqueTrimmedText(sessionIDs)
+	if len(sessionIDs) == 0 {
+		return SplitIssueClusterResult{}, fmt.Errorf("sessionIDs must include at least one session")
+	}
+	if minSessions < 1 {
+		minSessions = 1
+	}
+
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return SplitIssueClusterResult{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	commandTag, err := tx.Exec(
+		ctx,
+		`UPDATE error_markers em
+		 SET cluster_key = $4
+		 FROM sessions s
+		 WHERE em.session_id = s.id
+		   AND s.project_id = $1
+		   AND em.cluster_key = $2
+		   AND em.session_id = ANY($3::text[])`,
+		projectID,
+		sourceClusterKey,
+		sessionIDs,
+		newClusterKey,
+	)
+	if err != nil {
+		return SplitIssueClusterResult{}, err
+	}
+
+	if commandTag.RowsAffected() == 0 {
+		return SplitIssueClusterResult{}, fmt.Errorf("no markers matched source cluster and session IDs")
+	}
+
+	_, err = tx.Exec(
+		ctx,
+		`UPDATE issue_feedback_events
+		 SET cluster_key = $4
+		 WHERE project_id = $1
+		   AND cluster_key = $2
+		   AND session_id = ANY($3::text[])`,
+		projectID,
+		sourceClusterKey,
+		sessionIDs,
+		newClusterKey,
+	)
+	if err != nil {
+		return SplitIssueClusterResult{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return SplitIssueClusterResult{}, err
+	}
+
+	if _, err := p.PromoteClusters(ctx, projectID, minSessions); err != nil {
+		return SplitIssueClusterResult{}, err
+	}
+	if _, err := p.pruneOrphanIssueClusters(ctx, projectID); err != nil {
+		return SplitIssueClusterResult{}, err
+	}
+
+	sourceCluster, err := p.findIssueClusterByKey(ctx, projectID, sourceClusterKey)
+	if err != nil {
+		return SplitIssueClusterResult{}, err
+	}
+	newCluster, err := p.findIssueClusterByKey(ctx, projectID, newClusterKey)
+	if err != nil {
+		return SplitIssueClusterResult{}, err
+	}
+
+	return SplitIssueClusterResult{
+		SourceClusterKey: sourceClusterKey,
+		NewClusterKey:    newClusterKey,
+		MovedMarkerCount: int(commandTag.RowsAffected()),
+		SourceCluster:    sourceCluster,
+		NewCluster:       newCluster,
+	}, nil
+}
+
+func (p *Postgres) findIssueClusterByKey(
+	ctx context.Context,
+	projectID string,
+	clusterKey string,
+) (*IssueCluster, error) {
+	clusterKey = strings.TrimSpace(clusterKey)
+	if clusterKey == "" {
+		return nil, nil
+	}
+
+	clusters, err := p.ListIssueClusters(ctx, projectID, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, cluster := range clusters {
+		if cluster.Key == clusterKey {
+			stored := cluster
+			return &stored, nil
+		}
+	}
+	return nil, nil
+}
+
+func (p *Postgres) pruneOrphanIssueClusters(ctx context.Context, projectID string) (int, error) {
+	projectID = normalizeProjectID(projectID)
+	commandTag, err := p.pool.Exec(
+		ctx,
+		`DELETE FROM issue_clusters ic
+		 WHERE ic.project_id = $1
+		   AND NOT EXISTS (
+		     SELECT 1
+		     FROM error_markers em
+		     JOIN sessions s ON s.id = em.session_id
+		     WHERE em.cluster_key = ic.key
+		       AND s.project_id = ic.project_id
+		   )`,
+		projectID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return int(commandTag.RowsAffected()), nil
+}
+
 func (p *Postgres) LastIssueAlertAt(
 	ctx context.Context,
 	projectID string,
@@ -1319,6 +1721,15 @@ func normalizeIssueStateFilter(state string) string {
 	}
 }
 
+func normalizeIssueFeedbackKind(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case "false_positive", "true_positive", "invalid", "suppressed", "unsuppressed", "merge", "split":
+		return strings.TrimSpace(kind)
+	default:
+		return ""
+	}
+}
+
 func deriveClusterKey(route, kind, clusterHint, label string) string {
 	normalizedKind := normalizeMarkerKind(kind)
 	normalizedRoute := normalizeRouteForCluster(route)
@@ -1465,4 +1876,26 @@ func normalizeProjectID(projectID string) string {
 		return "proj_default"
 	}
 	return trimmed
+}
+
+func uniqueTrimmedText(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+
+	return result
 }

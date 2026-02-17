@@ -152,6 +152,10 @@ func (h *Handler) Router() http.Handler {
 			r.With(h.requireWriteAccess).Post("/ingest/session", h.ingestSession)
 			r.With(h.requireWriteAccess).Post("/issues/promote", h.promoteIssues)
 			r.With(h.requireWriteAccess).Post("/issues/{clusterKey}/state", h.updateIssueState)
+			r.With(h.requireWriteAccess).Post("/issues/{clusterKey}/feedback", h.recordIssueFeedback)
+			r.Get("/issues/{clusterKey}/feedback", h.listIssueFeedback)
+			r.With(h.requireWriteAccess).Post("/issues/merge", h.mergeIssues)
+			r.With(h.requireWriteAccess).Post("/issues/{clusterKey}/split", h.splitIssue)
 			r.Get("/issues/stats", h.listIssueStats)
 			r.Get("/issues", h.listIssues)
 			r.Get("/issues/{clusterKey}/sessions", h.listIssueSessions)
@@ -334,6 +338,28 @@ type updateIssueStateRequest struct {
 	Assignee   string `json:"assignee"`
 	MutedUntil string `json:"mutedUntil"`
 	Note       string `json:"note"`
+}
+
+type issueFeedbackRequest struct {
+	Kind      string         `json:"kind"`
+	SessionID string         `json:"sessionId"`
+	Note      string         `json:"note"`
+	CreatedBy string         `json:"createdBy"`
+	Metadata  map[string]any `json:"metadata"`
+}
+
+type mergeIssuesRequest struct {
+	TargetClusterKey  string   `json:"targetClusterKey"`
+	SourceClusterKeys []string `json:"sourceClusterKeys"`
+	Note              string   `json:"note"`
+	CreatedBy         string   `json:"createdBy"`
+}
+
+type splitIssueRequest struct {
+	NewClusterKey string   `json:"newClusterKey"`
+	SessionIDs    []string `json:"sessionIds"`
+	Note          string   `json:"note"`
+	CreatedBy     string   `json:"createdBy"`
 }
 
 func (h *Handler) listProjectAPIKeys(w http.ResponseWriter, r *http.Request) {
@@ -706,6 +732,172 @@ func (h *Handler) updateIssueState(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"state": updated,
+	})
+}
+
+func (h *Handler) recordIssueFeedback(w http.ResponseWriter, r *http.Request) {
+	clusterKey := strings.TrimSpace(chi.URLParam(r, "clusterKey"))
+	if clusterKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "clusterKey is required"})
+		return
+	}
+
+	payload := issueFeedbackRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	projectID := h.projectIDFromContext(r.Context())
+	exists, err := h.store.IssueClusterExists(r.Context(), projectID, clusterKey)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "issue lookup failed"})
+		return
+	}
+	if !exists {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "issue cluster not found"})
+		return
+	}
+
+	event, err := h.store.RecordIssueFeedback(
+		r.Context(),
+		projectID,
+		clusterKey,
+		payload.SessionID,
+		payload.Kind,
+		payload.Note,
+		payload.Metadata,
+		payload.CreatedBy,
+	)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"feedback": event,
+	})
+}
+
+func (h *Handler) listIssueFeedback(w http.ResponseWriter, r *http.Request) {
+	clusterKey := strings.TrimSpace(chi.URLParam(r, "clusterKey"))
+	if clusterKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "clusterKey is required"})
+		return
+	}
+
+	limit := 30
+	if candidate := strings.TrimSpace(r.URL.Query().Get("limit")); candidate != "" {
+		parsed, err := strconv.Atoi(candidate)
+		if err != nil || parsed < 1 || parsed > 200 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be an integer between 1 and 200"})
+			return
+		}
+		limit = parsed
+	}
+
+	projectID := h.projectIDFromContext(r.Context())
+	events, err := h.store.ListIssueFeedback(r.Context(), projectID, clusterKey, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "feedback lookup failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"clusterKey": clusterKey,
+		"limit":      limit,
+		"events":     events,
+	})
+}
+
+func (h *Handler) mergeIssues(w http.ResponseWriter, r *http.Request) {
+	payload := mergeIssuesRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	projectID := h.projectIDFromContext(r.Context())
+	result, err := h.store.MergeIssueClusters(
+		r.Context(),
+		projectID,
+		payload.TargetClusterKey,
+		payload.SourceClusterKeys,
+		h.clusterPromoteMinSession,
+	)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	_, _ = h.store.RecordIssueFeedback(
+		r.Context(),
+		projectID,
+		result.TargetClusterKey,
+		"",
+		"merge",
+		payload.Note,
+		map[string]any{
+			"sourceClusterKeys": result.SourceClusterKeys,
+			"movedMarkerCount":  result.MovedMarkerCount,
+		},
+		payload.CreatedBy,
+	)
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"result": result,
+	})
+}
+
+func (h *Handler) splitIssue(w http.ResponseWriter, r *http.Request) {
+	sourceClusterKey := strings.TrimSpace(chi.URLParam(r, "clusterKey"))
+	if sourceClusterKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "clusterKey is required"})
+		return
+	}
+
+	payload := splitIssueRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	newClusterKey := strings.TrimSpace(payload.NewClusterKey)
+	if newClusterKey == "" {
+		newClusterKey = sourceClusterKey + ":split:" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	}
+
+	projectID := h.projectIDFromContext(r.Context())
+	result, err := h.store.SplitIssueCluster(
+		r.Context(),
+		projectID,
+		sourceClusterKey,
+		newClusterKey,
+		payload.SessionIDs,
+		h.clusterPromoteMinSession,
+	)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	_, _ = h.store.RecordIssueFeedback(
+		r.Context(),
+		projectID,
+		sourceClusterKey,
+		"",
+		"split",
+		payload.Note,
+		map[string]any{
+			"newClusterKey":    result.NewClusterKey,
+			"sessionIds":       payload.SessionIDs,
+			"movedMarkerCount": result.MovedMarkerCount,
+		},
+		payload.CreatedBy,
+	)
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"result": result,
 	})
 }
 

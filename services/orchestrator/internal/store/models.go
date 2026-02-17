@@ -69,6 +69,33 @@ type IssueClusterState struct {
 	UpdatedAt  time.Time  `json:"updatedAt"`
 }
 
+type IssueFeedbackEvent struct {
+	ID           string         `json:"id"`
+	ProjectID    string         `json:"projectId"`
+	ClusterKey   string         `json:"clusterKey"`
+	SessionID    string         `json:"sessionId,omitempty"`
+	FeedbackKind string         `json:"feedbackKind"`
+	Note         string         `json:"note"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	CreatedBy    string         `json:"createdBy"`
+	CreatedAt    time.Time      `json:"createdAt"`
+}
+
+type MergeIssueClustersResult struct {
+	TargetClusterKey  string        `json:"targetClusterKey"`
+	SourceClusterKeys []string      `json:"sourceClusterKeys"`
+	MovedMarkerCount  int           `json:"movedMarkerCount"`
+	TargetCluster     *IssueCluster `json:"targetCluster,omitempty"`
+}
+
+type SplitIssueClusterResult struct {
+	SourceClusterKey string        `json:"sourceClusterKey"`
+	NewClusterKey    string        `json:"newClusterKey"`
+	MovedMarkerCount int           `json:"movedMarkerCount"`
+	SourceCluster    *IssueCluster `json:"sourceCluster,omitempty"`
+	NewCluster       *IssueCluster `json:"newCluster,omitempty"`
+}
+
 type IssueKindStat struct {
 	Kind         string    `json:"kind"`
 	MarkerCount  int       `json:"markerCount"`

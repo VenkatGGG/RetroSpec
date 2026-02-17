@@ -214,6 +214,30 @@
   opacity: 0.7;
 }
 
+.feedback-controls {
+  border-top: 1px solid #22304d;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.75rem 0;
+  padding-top: 0.75rem;
+}
+
+.feedback-controls button {
+  background: #1d4d8f;
+  border: 1px solid #4f8edb;
+  border-radius: 8px;
+  color: #eff6ff;
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0.45rem 0.65rem;
+}
+
+.feedback-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 .session-heading {
   align-items: flex-start;
   display: flex;

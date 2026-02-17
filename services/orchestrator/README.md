@@ -15,6 +15,10 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 - `POST /v1/ingest/session`
 - `POST /v1/issues/promote`
 - `POST /v1/issues/{clusterKey}/state`
+- `POST /v1/issues/{clusterKey}/feedback`
+- `GET /v1/issues/{clusterKey}/feedback`
+- `POST /v1/issues/merge`
+- `POST /v1/issues/{clusterKey}/split`
 - `GET /v1/issues`
 - `GET /v1/issues/{clusterKey}/sessions`
 - `GET /v1/sessions/{sessionID}`
@@ -32,7 +36,8 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 7. Apply SQL in `db/migrations/006_issue_cluster_states.sql`.
 8. Apply SQL in `db/migrations/007_issue_alert_events.sql`.
 9. Apply SQL in `db/migrations/008_error_markers_evidence.sql`.
-5. Start API:
+10. Apply SQL in `db/migrations/009_issue_feedback_and_cluster_ops.sql`.
+11. Start API:
 
 ```bash
 go run ./cmd/api
@@ -47,6 +52,8 @@ go run ./cmd/api
   - Query params: `limit` (1-200), `reportStatus` (`pending|ready|failed|discarded`), `minConfidence` (0-1).
 - `GET /v1/issues` supports optional `state` filter: `active|open|acknowledged|resolved|muted`.
 - `POST /v1/issues/{clusterKey}/state` updates triage workflow state (`open|acknowledged|resolved|muted`) with assignee, note, and optional mute window.
+- `POST /v1/issues/{clusterKey}/feedback` records false-positive/true-positive/suppression feedback events for quality tuning.
+- `POST /v1/issues/merge` and `POST /v1/issues/{clusterKey}/split` support operator-driven cluster quality corrections.
 - Configure outbound alerts with `ALERT_WEBHOOK_URL` (optional), plus `ALERT_AUTH_HEADER`, `ALERT_COOLDOWN_MINUTES`, and `ALERT_MIN_CLUSTER_CONFIDENCE`.
 - `POST /v1/artifacts/session-events` stores rrweb event JSON and returns `eventsObjectKey` for session ingest.
 - Session event payloads are loaded from S3-compatible storage via the configured `S3_*` environment variables.

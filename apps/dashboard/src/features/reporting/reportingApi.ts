@@ -34,6 +34,25 @@ export interface QueueHealthSnapshot {
   };
 }
 
+export interface IssueFeedbackEvent {
+  id: string;
+  projectId: string;
+  clusterKey: string;
+  sessionId?: string;
+  feedbackKind:
+    | "false_positive"
+    | "true_positive"
+    | "invalid"
+    | "suppressed"
+    | "unsuppressed"
+    | "merge"
+    | "split";
+  note: string;
+  metadata?: Record<string, unknown>;
+  createdBy: string;
+  createdAt: string;
+}
+
 export const reportingApi = createApi({
   reducerPath: "reportingApi",
   baseQuery: fetchBaseQuery({
@@ -103,6 +122,25 @@ export const reportingApi = createApi({
       }) => response,
       providesTags: (_result, _error, args) => [{ type: "Issue", id: `${args.clusterKey}:sessions` }],
     }),
+    listIssueFeedback: builder.query<
+      {
+        clusterKey: string;
+        limit: number;
+        events: IssueFeedbackEvent[];
+      },
+      { clusterKey: string; limit?: number }
+    >({
+      query: ({ clusterKey, limit }) =>
+        typeof limit === "number"
+          ? `/v1/issues/${encodeURIComponent(clusterKey)}/feedback?limit=${limit}`
+          : `/v1/issues/${encodeURIComponent(clusterKey)}/feedback`,
+      transformResponse: (response: {
+        clusterKey: string;
+        limit: number;
+        events: IssueFeedbackEvent[];
+      }) => response,
+      providesTags: (_result, _error, args) => [{ type: "Issue", id: `${args.clusterKey}:feedback` }],
+    }),
     getSession: builder.query<SessionSummary, string>({
       query: (sessionId) => `/v1/sessions/${sessionId}`,
       transformResponse: (response: { session: SessionSummary }) => response.session,
@@ -162,6 +200,73 @@ export const reportingApi = createApi({
         { type: "Issue", id: "LIST" },
         { type: "Issue", id: args.clusterKey },
         { type: "Issue", id: `${args.clusterKey}:sessions` },
+      ],
+    }),
+    submitIssueFeedback: builder.mutation<
+      { feedback: IssueFeedbackEvent },
+      {
+        clusterKey: string;
+        kind: IssueFeedbackEvent["feedbackKind"];
+        sessionId?: string;
+        note?: string;
+        createdBy?: string;
+        metadata?: Record<string, unknown>;
+      }
+    >({
+      query: ({ clusterKey, ...body }) => ({
+        url: `/v1/issues/${encodeURIComponent(clusterKey)}/feedback`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (_result, _error, args) => [
+        { type: "Issue", id: "LIST" },
+        { type: "Issue", id: args.clusterKey },
+        { type: "Issue", id: `${args.clusterKey}:feedback` },
+      ],
+    }),
+    mergeIssues: builder.mutation<
+      {
+        result: {
+          targetClusterKey: string;
+          sourceClusterKeys: string[];
+          movedMarkerCount: number;
+        };
+      },
+      { targetClusterKey: string; sourceClusterKeys: string[]; note?: string; createdBy?: string }
+    >({
+      query: (payload) => ({
+        url: "/v1/issues/merge",
+        method: "POST",
+        body: payload,
+      }),
+      invalidatesTags: [{ type: "Issue", id: "LIST" }],
+    }),
+    splitIssue: builder.mutation<
+      {
+        result: {
+          sourceClusterKey: string;
+          newClusterKey: string;
+          movedMarkerCount: number;
+        };
+      },
+      {
+        clusterKey: string;
+        newClusterKey?: string;
+        sessionIds: string[];
+        note?: string;
+        createdBy?: string;
+      }
+    >({
+      query: ({ clusterKey, ...body }) => ({
+        url: `/v1/issues/${encodeURIComponent(clusterKey)}/split`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (_result, _error, args) => [
+        { type: "Issue", id: "LIST" },
+        { type: "Issue", id: args.clusterKey },
+        { type: "Issue", id: `${args.clusterKey}:sessions` },
+        { type: "Issue", id: `${args.clusterKey}:feedback` },
       ],
     }),
     cleanupData: builder.mutation<
@@ -254,11 +359,15 @@ export const {
   useGetIssuesQuery,
   useGetIssueStatsQuery,
   useGetIssueSessionsQuery,
+  useListIssueFeedbackQuery,
   useGetSessionQuery,
   useGetSessionEventsQuery,
   useGetSessionArtifactTokenQuery,
   usePromoteIssuesMutation,
   useUpdateIssueStateMutation,
+  useSubmitIssueFeedbackMutation,
+  useMergeIssuesMutation,
+  useSplitIssueMutation,
   useCleanupDataMutation,
   useCreateProjectMutation,
   useCreateProjectKeyMutation,

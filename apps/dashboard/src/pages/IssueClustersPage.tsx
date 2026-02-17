@@ -4,7 +4,9 @@ import {
   useCleanupDataMutation,
   useGetIssuesQuery,
   useGetIssueStatsQuery,
+  useMergeIssuesMutation,
   usePromoteIssuesMutation,
+  useSubmitIssueFeedbackMutation,
   useUpdateIssueStateMutation,
 } from "../features/reporting/reportingApi";
 import type { IssueCluster } from "../features/sessions/types";
@@ -57,11 +59,16 @@ export function IssueClustersPage() {
   const { data: issueStats } = useGetIssueStatsQuery(lookbackHours);
   const [promoteIssues, { isLoading: isPromoting }] = usePromoteIssuesMutation();
   const [updateIssueState] = useUpdateIssueStateMutation();
+  const [submitIssueFeedback] = useSubmitIssueFeedbackMutation();
+  const [mergeIssues, { isLoading: isMerging }] = useMergeIssuesMutation();
   const [cleanupData, { isLoading: isCleaning }] = useCleanupDataMutation();
   const [maintenanceMessage, setMaintenanceMessage] = useState<string>("");
   const [triageDrafts, setTriageDrafts] = useState<Record<string, TriageDraft>>({});
   const [savingIssueKey, setSavingIssueKey] = useState<string | null>(null);
   const [triageMessage, setTriageMessage] = useState<string>("");
+  const [mergeTargetClusterKey, setMergeTargetClusterKey] = useState<string>("");
+  const [mergeSourceKeysInput, setMergeSourceKeysInput] = useState<string>("");
+  const [mergeNote, setMergeNote] = useState<string>("Merged due to operator feedback.");
 
   useEffect(() => {
     if (clusters.length === 0) {
@@ -133,6 +140,131 @@ export function IssueClustersPage() {
     }
   };
 
+  const handleFeedback = async (
+    clusterKey: string,
+    kind:
+      | "false_positive"
+      | "true_positive"
+      | "invalid"
+      | "suppressed"
+      | "unsuppressed",
+    note: string,
+    metadata?: Record<string, unknown>,
+  ) => {
+    setSavingIssueKey(clusterKey);
+    try {
+      await submitIssueFeedback({
+        clusterKey,
+        kind,
+        note,
+        createdBy: "dashboard",
+        metadata,
+      }).unwrap();
+      setTriageMessage(`Recorded ${kind} feedback for ${clusterKey}.`);
+    } catch {
+      setTriageMessage(`Failed to record ${kind} feedback for ${clusterKey}.`);
+    } finally {
+      setSavingIssueKey(null);
+    }
+  };
+
+  const handleSuppress = async (cluster: IssueCluster, days: number) => {
+    setSavingIssueKey(cluster.key);
+    const mutedUntil = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    const note = `Suppressed for ${days} day(s) via feedback loop.`;
+    try {
+      await updateIssueState({
+        clusterKey: cluster.key,
+        state: "muted",
+        assignee: cluster.assignee || "",
+        mutedUntil,
+        note,
+      }).unwrap();
+      await submitIssueFeedback({
+        clusterKey: cluster.key,
+        kind: "suppressed",
+        note,
+        createdBy: "dashboard",
+        metadata: { days },
+      }).unwrap();
+      setTriageMessage(`Suppressed ${cluster.key} for ${days} day(s).`);
+      setTriageDrafts((previous) => ({
+        ...previous,
+        [cluster.key]: {
+          ...(previous[cluster.key] ?? createDraft(cluster)),
+          state: "muted",
+          mutedUntil: toDatetimeLocalValue(mutedUntil),
+          note,
+        },
+      }));
+    } catch {
+      setTriageMessage(`Failed to suppress ${cluster.key}.`);
+    } finally {
+      setSavingIssueKey(null);
+    }
+  };
+
+  const handleUnsuppress = async (cluster: IssueCluster) => {
+    setSavingIssueKey(cluster.key);
+    const note = "Unsuppressed via feedback loop.";
+    try {
+      await updateIssueState({
+        clusterKey: cluster.key,
+        state: "open",
+        assignee: cluster.assignee || "",
+        note,
+      }).unwrap();
+      await submitIssueFeedback({
+        clusterKey: cluster.key,
+        kind: "unsuppressed",
+        note,
+        createdBy: "dashboard",
+      }).unwrap();
+      setTriageMessage(`Unsuppressed ${cluster.key}.`);
+      setTriageDrafts((previous) => ({
+        ...previous,
+        [cluster.key]: {
+          ...(previous[cluster.key] ?? createDraft(cluster)),
+          state: "open",
+          mutedUntil: "",
+          note,
+        },
+      }));
+    } catch {
+      setTriageMessage(`Failed to unsuppress ${cluster.key}.`);
+    } finally {
+      setSavingIssueKey(null);
+    }
+  };
+
+  const handleMerge = async () => {
+    const targetClusterKey = mergeTargetClusterKey.trim();
+    const sourceClusterKeys = mergeSourceKeysInput
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0 && value !== targetClusterKey);
+
+    if (!targetClusterKey || sourceClusterKeys.length === 0) {
+      setTriageMessage("Merge requires one target cluster key and at least one source key.");
+      return;
+    }
+
+    try {
+      const result = await mergeIssues({
+        targetClusterKey,
+        sourceClusterKeys,
+        note: mergeNote.trim(),
+        createdBy: "dashboard",
+      }).unwrap();
+      setTriageMessage(
+        `Merged ${result.result.sourceClusterKeys.length} source cluster(s) into ${result.result.targetClusterKey}; moved ${result.result.movedMarkerCount} markers.`,
+      );
+      setMergeSourceKeysInput("");
+    } catch {
+      setTriageMessage("Issue cluster merge failed. Verify source and target keys.");
+    }
+  };
+
   return (
     <section>
       <h1>Promoted Issue Clusters</h1>
@@ -178,6 +310,33 @@ export function IssueClustersPage() {
           {isCleaning ? "Cleaning..." : "Run Retention Cleanup"}
         </button>
         {isFetching && <span>Refreshing...</span>}
+      </div>
+      <div className="admin-card merge-card">
+        <h2>Merge Clusters</h2>
+        <label htmlFor="merge-target-cluster">Target Cluster Key</label>
+        <input
+          id="merge-target-cluster"
+          value={mergeTargetClusterKey}
+          onChange={(event) => setMergeTargetClusterKey(event.target.value)}
+          placeholder="api_error:1234abcd..."
+        />
+        <label htmlFor="merge-source-clusters">Source Cluster Keys (comma-separated)</label>
+        <input
+          id="merge-source-clusters"
+          value={mergeSourceKeysInput}
+          onChange={(event) => setMergeSourceKeysInput(event.target.value)}
+          placeholder="api_error:old1..., api_error:old2..."
+        />
+        <label htmlFor="merge-note">Merge Note</label>
+        <input
+          id="merge-note"
+          value={mergeNote}
+          onChange={(event) => setMergeNote(event.target.value)}
+          placeholder="Merged due to duplicate fingerprinting"
+        />
+        <button type="button" onClick={handleMerge} disabled={isMerging}>
+          {isMerging ? "Merging..." : "Merge clusters"}
+        </button>
       </div>
       {maintenanceMessage && <p>{maintenanceMessage}</p>}
       {triageMessage && <p>{triageMessage}</p>}
@@ -229,6 +388,61 @@ export function IssueClustersPage() {
               <strong>Triage:</strong> {cluster.state} | <strong>Assignee:</strong>{" "}
               {cluster.assignee || "unassigned"}
             </p>
+            <div className="feedback-controls">
+              <button
+                type="button"
+                onClick={() =>
+                  void handleFeedback(
+                    cluster.key,
+                    "false_positive",
+                    "Marked false positive by dashboard operator.",
+                  )
+                }
+                disabled={savingIssueKey === cluster.key}
+              >
+                Mark False Positive
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void handleFeedback(
+                    cluster.key,
+                    "true_positive",
+                    "Confirmed true positive by dashboard operator.",
+                  )
+                }
+                disabled={savingIssueKey === cluster.key}
+              >
+                Mark True Positive
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSuppress(cluster, 7);
+                }}
+                disabled={savingIssueKey === cluster.key}
+              >
+                Suppress 7d
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSuppress(cluster, 30);
+                }}
+                disabled={savingIssueKey === cluster.key}
+              >
+                Suppress 30d
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleUnsuppress(cluster);
+                }}
+                disabled={savingIssueKey === cluster.key}
+              >
+                Unsuppress
+              </button>
+            </div>
             <div className="triage-controls">
               <label htmlFor={`triage-state-${cluster.key}`}>State</label>
               <select
