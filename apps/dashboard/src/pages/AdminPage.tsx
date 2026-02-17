@@ -6,6 +6,7 @@ import {
   useGetQueueHealthQuery,
   useListProjectKeysQuery,
   useListProjectsQuery,
+  useRedriveQueueDeadLettersMutation,
 } from "../features/reporting/reportingApi";
 
 export function AdminPage() {
@@ -14,6 +15,7 @@ export function AdminPage() {
   const [label, setLabel] = useState("default-key");
   const [projectId, setProjectId] = useState("");
   const [newKeyLabel, setNewKeyLabel] = useState("rotation-key");
+  const [redriveLimit, setRedriveLimit] = useState("25");
   const [resultMessage, setResultMessage] = useState("");
 
   const { data: projects = [], isLoading: isProjectsLoading } = useListProjectsQuery();
@@ -27,6 +29,8 @@ export function AdminPage() {
   } = useGetQueueHealthQuery(undefined, { pollingInterval: 15000 });
   const [createProject, { isLoading: isCreatingProject }] = useCreateProjectMutation();
   const [createProjectKey, { isLoading: isCreatingKey }] = useCreateProjectKeyMutation();
+  const [redriveQueueDeadLetters, { isLoading: isRedrivingQueue }] =
+    useRedriveQueueDeadLettersMutation();
 
   const handleCreateProject = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -50,6 +54,22 @@ export function AdminPage() {
       );
     } catch {
       setResultMessage("API key creation failed. Verify project ID and admin auth.");
+    }
+  };
+
+  const handleQueueRedrive = async (queue: "replay" | "analysis") => {
+    const parsedLimit = Number.parseInt(redriveLimit, 10);
+    const limit =
+      Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(500, parsedLimit) : 25;
+
+    try {
+      const response = await redriveQueueDeadLetters({ queue, limit }).unwrap();
+      setResultMessage(
+        `Re-drive ${response.result.queueKind}: moved ${response.result.redriven}, skipped ${response.result.skipped}, remaining dead-letter ${response.result.remainingFailed}.`,
+      );
+      void refetchQueueHealth();
+    } catch {
+      setResultMessage("Queue re-drive failed. Verify admin auth and Redis connectivity.");
     }
   };
 
@@ -88,6 +108,31 @@ export function AdminPage() {
               {queueHealth.thresholds.criticalRetry}, or dead-letter ≥{" "}
               {queueHealth.thresholds.criticalFailed}.
             </p>
+            <div className="queue-redrive-controls">
+              <label htmlFor="dead-letter-redrive-limit">Dead-letter re-drive limit</label>
+              <input
+                id="dead-letter-redrive-limit"
+                type="number"
+                min={1}
+                max={500}
+                value={redriveLimit}
+                onChange={(event) => setRedriveLimit(event.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => void handleQueueRedrive("replay")}
+                disabled={isRedrivingQueue}
+              >
+                {isRedrivingQueue ? "Re-driving..." : "Re-drive replay"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleQueueRedrive("analysis")}
+                disabled={isRedrivingQueue}
+              >
+                {isRedrivingQueue ? "Re-driving..." : "Re-drive analysis"}
+              </button>
+            </div>
             <div className="queue-health-grid">
               <div className="stats-card">
                 <h3>Replay Queue</h3>

@@ -32,6 +32,21 @@ type QueueStats struct {
 	AnalysisFailedDepth int64 `json:"analysisFailedDepth"`
 }
 
+type DeadLetterQueueKind string
+
+const (
+	DeadLetterQueueReplay   DeadLetterQueueKind = "replay"
+	DeadLetterQueueAnalysis DeadLetterQueueKind = "analysis"
+)
+
+type DeadLetterRedriveResult struct {
+	QueueKind       DeadLetterQueueKind `json:"queueKind"`
+	Requested       int                 `json:"requested"`
+	Redriven        int                 `json:"redriven"`
+	Skipped         int                 `json:"skipped"`
+	RemainingFailed int64               `json:"remainingFailed"`
+}
+
 type Producer interface {
 	EnqueueReplayJob(ctx context.Context, job ReplayJob) error
 	EnqueueAnalysisJob(ctx context.Context, job AnalysisJob) error
@@ -40,6 +55,10 @@ type Producer interface {
 
 type StatsProvider interface {
 	QueueStats(ctx context.Context) (QueueStats, error)
+}
+
+type DeadLetterRedriver interface {
+	RedriveDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, limit int) (DeadLetterRedriveResult, error)
 }
 
 type NoopProducer struct{}
@@ -62,4 +81,11 @@ func (p *NoopProducer) Close() error {
 
 func (p *NoopProducer) QueueStats(_ context.Context) (QueueStats, error) {
 	return QueueStats{}, nil
+}
+
+func (p *NoopProducer) RedriveDeadLetters(_ context.Context, queueKind DeadLetterQueueKind, limit int) (DeadLetterRedriveResult, error) {
+	return DeadLetterRedriveResult{
+		QueueKind: queueKind,
+		Requested: limit,
+	}, nil
 }

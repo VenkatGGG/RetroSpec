@@ -11,6 +11,7 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 - `GET /v1/admin/projects/{projectID}/keys`
 - `POST /v1/internal/replay-results`
 - `POST /v1/internal/analysis-reports`
+- `POST /v1/admin/queue-redrive`
 - `POST /v1/artifacts/session-events`
 - `POST /v1/ingest/session`
 - `POST /v1/issues/promote`
@@ -50,6 +51,7 @@ go run ./cmd/api
 - `POST /v1/ingest/session` can auto-promote clusters immediately when `AUTO_PROMOTE_ON_INGEST=true`.
 - `GET /v1/issues/{clusterKey}/sessions` returns the recent sessions mapped to a promoted cluster key, including report-card status/confidence.
   - Query params: `limit` (1-200), `reportStatus` (`pending|ready|failed|discarded`), `minConfidence` (0-1).
+- `POST /v1/admin/queue-redrive` accepts `{ "queue": "replay|analysis", "limit": 25 }` and moves up to `limit` dead-letter payloads back to the Redis stream.
 - `GET /v1/issues` supports optional `state` filter: `active|open|acknowledged|resolved|muted`.
 - `POST /v1/issues/{clusterKey}/state` updates triage workflow state (`open|acknowledged|resolved|muted`) with assignee, note, and optional mute window.
 - `POST /v1/issues/{clusterKey}/feedback` records false-positive/true-positive/suppression feedback events for quality tuning.

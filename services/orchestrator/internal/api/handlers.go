@@ -25,6 +25,7 @@ type Handler struct {
 	artifactStore            artifacts.Store
 	replayProducer           queue.Producer
 	queueStatsProvider       queue.StatsProvider
+	queueRedriver            queue.DeadLetterRedriver
 	corsAllowedOrigins       []string
 	adminAPIKey              string
 	internalAPIKey           string
@@ -82,6 +83,10 @@ func NewHandler(
 	if provider, ok := replayProducer.(queue.StatsProvider); ok {
 		queueStatsProvider = provider
 	}
+	var queueRedriver queue.DeadLetterRedriver
+	if provider, ok := replayProducer.(queue.DeadLetterRedriver); ok {
+		queueRedriver = provider
+	}
 
 	metrics := newAPIMetrics(queueStatsProvider)
 
@@ -89,6 +94,7 @@ func NewHandler(
 		store:                    store,
 		replayProducer:           replayProducer,
 		queueStatsProvider:       queueStatsProvider,
+		queueRedriver:            queueRedriver,
 		artifactStore:            artifactStore,
 		corsAllowedOrigins:       corsAllowedOrigins,
 		adminAPIKey:              adminAPIKey,
@@ -140,6 +146,7 @@ func (h *Handler) Router() http.Handler {
 			r.With(h.requireAdminAccess).Get("/projects/{projectID}/keys", h.listProjectAPIKeys)
 			r.With(h.requireAdminAccess).Post("/projects/{projectID}/keys", h.createProjectAPIKey)
 			r.With(h.requireAdminAccess).Get("/queue-health", h.getQueueHealth)
+			r.With(h.requireAdminAccess).Post("/queue-redrive", h.redriveDeadLetters)
 		})
 		r.With(h.requireInternalAccess).Post("/internal/replay-results", h.reportReplayResult)
 		r.With(h.requireInternalAccess).Post("/internal/analysis-reports", h.reportAnalysisResult)
@@ -362,6 +369,11 @@ type splitIssueRequest struct {
 	CreatedBy     string   `json:"createdBy"`
 }
 
+type queueRedriveRequest struct {
+	Queue string `json:"queue"`
+	Limit int    `json:"limit"`
+}
+
 func (h *Handler) listProjectAPIKeys(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	keys, err := h.store.ListProjectAPIKeys(r.Context(), projectID)
@@ -475,6 +487,57 @@ func (h *Handler) getQueueHealth(w http.ResponseWriter, r *http.Request) {
 			"criticalFailed":  criticalFailed,
 		},
 	})
+}
+
+func (h *Handler) redriveDeadLetters(w http.ResponseWriter, r *http.Request) {
+	if h.queueRedriver == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue redrive unavailable"})
+		return
+	}
+
+	payload := queueRedriveRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	queueKind, ok := parseDeadLetterQueueKind(payload.Queue)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "queue must be replay or analysis"})
+		return
+	}
+
+	limit := payload.Limit
+	if limit < 1 {
+		limit = 25
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+
+	result, err := h.queueRedriver.RedriveDeadLetters(ctx, queueKind, limit)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue redrive failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"result": result,
+	})
+}
+
+func parseDeadLetterQueueKind(value string) (queue.DeadLetterQueueKind, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "replay":
+		return queue.DeadLetterQueueReplay, true
+	case "analysis":
+		return queue.DeadLetterQueueAnalysis, true
+	default:
+		return "", false
+	}
 }
 
 func (h *Handler) reportReplayResult(w http.ResponseWriter, r *http.Request) {

@@ -34,6 +34,14 @@ export interface QueueHealthSnapshot {
   };
 }
 
+export interface QueueRedriveResult {
+  queueKind: "replay" | "analysis";
+  requested: number;
+  redriven: number;
+  skipped: number;
+  remainingFailed: number;
+}
+
 export interface IssueFeedbackEvent {
   id: string;
   projectId: string;
@@ -352,6 +360,19 @@ export const reportingApi = createApi({
       query: () => "/v1/admin/queue-health",
       transformResponse: (response: QueueHealthSnapshot) => response,
     }),
+    redriveQueueDeadLetters: builder.mutation<
+      { result: QueueRedriveResult },
+      { queue: "replay" | "analysis"; limit?: number }
+    >({
+      query: ({ queue, limit }) => ({
+        url: "/v1/admin/queue-redrive",
+        method: "POST",
+        body: {
+          queue,
+          limit,
+        },
+      }),
+    }),
   }),
 });
 
@@ -372,6 +393,7 @@ export const {
   useCreateProjectMutation,
   useCreateProjectKeyMutation,
   useGetQueueHealthQuery,
+  useRedriveQueueDeadLettersMutation,
   useListProjectsQuery,
   useListProjectKeysQuery,
 } = reportingApi;

@@ -24,6 +24,22 @@ func (s stubQueueStatsProvider) QueueStats(context.Context) (queue.QueueStats, e
 	return s.stats, nil
 }
 
+type stubQueueRedriver struct {
+	result    queue.DeadLetterRedriveResult
+	err       error
+	queueKind queue.DeadLetterQueueKind
+	limit     int
+}
+
+func (s *stubQueueRedriver) RedriveDeadLetters(_ context.Context, queueKind queue.DeadLetterQueueKind, limit int) (queue.DeadLetterRedriveResult, error) {
+	s.queueKind = queueKind
+	s.limit = limit
+	if s.err != nil {
+		return queue.DeadLetterRedriveResult{}, s.err
+	}
+	return s.result, nil
+}
+
 func TestGetQueueHealthUnavailableProvider(t *testing.T) {
 	handler := &Handler{}
 	request := httptest.NewRequest(http.MethodGet, "/v1/admin/queue-health", nil)
@@ -166,5 +182,71 @@ func TestMetricsQueueProviderErrorIncrementsCounter(t *testing.T) {
 	payload := recorder.Body.String()
 	if !strings.Contains(payload, "retrospec_queue_metrics_errors_total 1") {
 		t.Fatalf("expected queue metrics error counter to increment, payload=%s", payload)
+	}
+}
+
+func TestRedriveDeadLettersUnavailableProvider(t *testing.T) {
+	handler := &Handler{}
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/queue-redrive", strings.NewReader(`{"queue":"replay","limit":1}`))
+	recorder := httptest.NewRecorder()
+
+	handler.redriveDeadLetters(recorder, request)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, recorder.Code)
+	}
+}
+
+func TestRedriveDeadLettersRejectsInvalidQueueKind(t *testing.T) {
+	redriver := &stubQueueRedriver{}
+	handler := &Handler{
+		queueRedriver: redriver,
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/queue-redrive", strings.NewReader(`{"queue":"invalid","limit":1}`))
+	recorder := httptest.NewRecorder()
+
+	handler.redriveDeadLetters(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+}
+
+func TestRedriveDeadLettersSuccess(t *testing.T) {
+	redriver := &stubQueueRedriver{
+		result: queue.DeadLetterRedriveResult{
+			QueueKind:       queue.DeadLetterQueueAnalysis,
+			Requested:       7,
+			Redriven:        5,
+			Skipped:         1,
+			RemainingFailed: 9,
+		},
+	}
+	handler := &Handler{
+		queueRedriver: redriver,
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/queue-redrive", strings.NewReader(`{"queue":"analysis","limit":7}`))
+	recorder := httptest.NewRecorder()
+
+	handler.redriveDeadLetters(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if redriver.queueKind != queue.DeadLetterQueueAnalysis {
+		t.Fatalf("expected analysis queue kind, got %s", redriver.queueKind)
+	}
+	if redriver.limit != 7 {
+		t.Fatalf("expected limit=7, got %d", redriver.limit)
+	}
+
+	var body struct {
+		Result queue.DeadLetterRedriveResult `json:"result"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body.Result.Redriven != 5 || body.Result.Skipped != 1 || body.Result.RemainingFailed != 9 {
+		t.Fatalf("unexpected response body: %+v", body.Result)
 	}
 }

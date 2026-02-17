@@ -2,6 +2,8 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -179,4 +181,133 @@ func TestRedisProducerQueueStatsSnapshot(t *testing.T) {
 		stats.AnalysisFailedDepth != 1 {
 		t.Fatalf("unexpected analysis stats: %+v", stats)
 	}
+}
+
+func TestRedisProducerRedriveDeadLetters(t *testing.T) {
+	mr := miniredis.RunT(t)
+	ctx := context.Background()
+	replayQueue := "replay-jobs"
+	analysisQueue := "analysis-jobs"
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
+
+	producer, err := NewRedisProducer(mr.Addr(), replayQueue, analysisQueue)
+	if err != nil {
+		t.Fatalf("new producer failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = producer.Close()
+	})
+
+	oldPayload := `{"projectId":"proj_test","sessionId":"session-old","eventsObjectKey":"events/old.json","markerOffsetsMs":[1200],"triggerKind":"js_exception","attempt":3}`
+	newPayload := `{"projectId":"proj_test","sessionId":"session-new","eventsObjectKey":"events/new.json","markerOffsetsMs":[2400],"triggerKind":"js_exception","attempt":3}`
+	oldEntry, err := marshalFailedEntry(oldPayload, "old failed")
+	if err != nil {
+		t.Fatalf("marshal old failed entry: %v", err)
+	}
+	newEntry, err := marshalFailedEntry(newPayload, "new failed")
+	if err != nil {
+		t.Fatalf("marshal new failed entry: %v", err)
+	}
+	if err := client.LPush(ctx, replayQueue+":failed", oldEntry).Err(); err != nil {
+		t.Fatalf("seed old replay failed entry: %v", err)
+	}
+	if err := client.LPush(ctx, replayQueue+":failed", newEntry).Err(); err != nil {
+		t.Fatalf("seed new replay failed entry: %v", err)
+	}
+
+	firstResult, err := producer.RedriveDeadLetters(ctx, DeadLetterQueueReplay, 1)
+	if err != nil {
+		t.Fatalf("first redrive failed: %v", err)
+	}
+	if firstResult.Redriven != 1 || firstResult.Skipped != 0 || firstResult.RemainingFailed != 1 {
+		t.Fatalf("unexpected first redrive result: %+v", firstResult)
+	}
+
+	firstRows, err := client.XRange(ctx, replayQueue, "-", "+").Result()
+	if err != nil {
+		t.Fatalf("read replay queue stream failed: %v", err)
+	}
+	if len(firstRows) != 1 {
+		t.Fatalf("expected 1 stream row after first redrive, got %d", len(firstRows))
+	}
+	if payload, _ := firstRows[0].Values["payload"].(string); payload != oldPayload {
+		t.Fatalf("expected oldest payload first, got %v", firstRows[0].Values["payload"])
+	}
+
+	secondResult, err := producer.RedriveDeadLetters(ctx, DeadLetterQueueReplay, 10)
+	if err != nil {
+		t.Fatalf("second redrive failed: %v", err)
+	}
+	if secondResult.Redriven != 1 || secondResult.Skipped != 0 || secondResult.RemainingFailed != 0 {
+		t.Fatalf("unexpected second redrive result: %+v", secondResult)
+	}
+
+	allRows, err := client.XRange(ctx, replayQueue, "-", "+").Result()
+	if err != nil {
+		t.Fatalf("read replay queue stream failed: %v", err)
+	}
+	if len(allRows) != 2 {
+		t.Fatalf("expected 2 stream rows after second redrive, got %d", len(allRows))
+	}
+	if payload, _ := allRows[1].Values["payload"].(string); payload != newPayload {
+		t.Fatalf("expected newest payload second, got %v", allRows[1].Values["payload"])
+	}
+}
+
+func TestRedisProducerRedriveDeadLettersSkipsUnprocessable(t *testing.T) {
+	mr := miniredis.RunT(t)
+	ctx := context.Background()
+	replayQueue := "replay-jobs"
+	analysisQueue := "analysis-jobs"
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
+
+	producer, err := NewRedisProducer(mr.Addr(), replayQueue, analysisQueue)
+	if err != nil {
+		t.Fatalf("new producer failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = producer.Close()
+	})
+
+	if err := client.LPush(ctx, replayQueue+":failed", "this-is-not-json").Err(); err != nil {
+		t.Fatalf("seed malformed replay failed entry: %v", err)
+	}
+
+	result, err := producer.RedriveDeadLetters(ctx, DeadLetterQueueReplay, 5)
+	if err != nil {
+		t.Fatalf("redrive failed: %v", err)
+	}
+	if result.Redriven != 0 || result.Skipped != 1 || result.RemainingFailed != 0 {
+		t.Fatalf("unexpected redrive result: %+v", result)
+	}
+
+	unprocessableDepth, err := client.LLen(ctx, replayQueue+":failed:unprocessable").Result()
+	if err != nil {
+		t.Fatalf("read unprocessable queue failed: %v", err)
+	}
+	if unprocessableDepth != 1 {
+		t.Fatalf("expected 1 unprocessable entry, got %d", unprocessableDepth)
+	}
+}
+
+func marshalFailedEntry(payload string, details string) (string, error) {
+	entry := map[string]any{
+		"failedAt": "2026-01-01T00:00:00Z",
+		"error":    details,
+		"attempt":  3,
+		"payload":  payload,
+	}
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		return "", fmt.Errorf("marshal failed entry: %w", err)
+	}
+	return string(encoded), nil
 }

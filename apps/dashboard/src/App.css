@@ -131,6 +131,43 @@
   margin-top: 1rem;
 }
 
+.queue-redrive-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.queue-redrive-controls label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.queue-redrive-controls input {
+  background: #16263f;
+  border: 1px solid #38507b;
+  border-radius: 8px;
+  color: #e3e8f2;
+  padding: 0.45rem 0.55rem;
+  width: 92px;
+}
+
+.queue-redrive-controls button {
+  background: #1e3a8a;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  color: #eff6ff;
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0.45rem 0.65rem;
+}
+
+.queue-redrive-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 .queue-health-grid {
   display: grid;
   gap: 0.75rem;

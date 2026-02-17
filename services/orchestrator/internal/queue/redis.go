@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -112,6 +113,115 @@ func (p *RedisProducer) QueueStats(ctx context.Context) (QueueStats, error) {
 		AnalysisRetryDepth:  analysis.retryDepth,
 		AnalysisFailedDepth: analysis.failedDepth,
 	}, nil
+}
+
+func (p *RedisProducer) RedriveDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, limit int) (DeadLetterRedriveResult, error) {
+	if err := p.ensureStreamQueues(ctx); err != nil {
+		return DeadLetterRedriveResult{}, err
+	}
+
+	queueName, err := p.deadLetterQueueName(queueKind)
+	if err != nil {
+		return DeadLetterRedriveResult{}, err
+	}
+
+	normalizedLimit := limit
+	if normalizedLimit < 1 {
+		normalizedLimit = 1
+	}
+	if normalizedLimit > 500 {
+		normalizedLimit = 500
+	}
+
+	failedKey := queueName + ":failed"
+	unprocessableKey := failedKey + ":unprocessable"
+	result := DeadLetterRedriveResult{
+		QueueKind: queueKind,
+		Requested: normalizedLimit,
+	}
+
+	for processed := 0; processed < normalizedLimit; processed++ {
+		failedEntry, err := p.client.RPop(ctx, failedKey).Result()
+		if errors.Is(err, redis.Nil) {
+			break
+		}
+		if err != nil {
+			return result, fmt.Errorf("pop dead-letter entry: %w", err)
+		}
+
+		payload, ok := extractDeadLetterPayload(failedEntry)
+		if !ok {
+			if err := p.client.LPush(ctx, unprocessableKey, failedEntry).Err(); err != nil {
+				return result, fmt.Errorf("store unprocessable dead-letter entry: %w", err)
+			}
+			result.Skipped++
+			continue
+		}
+
+		if err := p.client.XAdd(ctx, &redis.XAddArgs{
+			Stream: queueName,
+			Values: map[string]any{
+				"payload": payload,
+			},
+		}).Err(); err != nil {
+			if restoreErr := p.client.RPush(ctx, failedKey, failedEntry).Err(); restoreErr != nil {
+				return result, fmt.Errorf("redrive enqueue failed: %v (restore failed: %w)", err, restoreErr)
+			}
+			return result, fmt.Errorf("redrive enqueue failed: %w", err)
+		}
+
+		result.Redriven++
+	}
+
+	remainingFailed, err := p.client.LLen(ctx, failedKey).Result()
+	if err != nil && err != redis.Nil {
+		return result, fmt.Errorf("remaining dead-letter depth: %w", err)
+	}
+	if errors.Is(err, redis.Nil) {
+		remainingFailed = 0
+	}
+	result.RemainingFailed = remainingFailed
+
+	return result, nil
+}
+
+func (p *RedisProducer) deadLetterQueueName(queueKind DeadLetterQueueKind) (string, error) {
+	switch queueKind {
+	case DeadLetterQueueReplay:
+		return p.replayQueueName, nil
+	case DeadLetterQueueAnalysis:
+		return p.analysisQueueName, nil
+	default:
+		return "", fmt.Errorf("unsupported queue kind %q", queueKind)
+	}
+}
+
+func extractDeadLetterPayload(failedEntry string) (string, bool) {
+	trimmed := strings.TrimSpace(failedEntry)
+	if trimmed == "" {
+		return "", false
+	}
+
+	envelope := struct {
+		Payload string `json:"payload"`
+	}{}
+	if err := json.Unmarshal([]byte(trimmed), &envelope); err == nil {
+		payload := strings.TrimSpace(envelope.Payload)
+		if payload != "" {
+			return payload, true
+		}
+	}
+
+	payloadCandidate := map[string]any{}
+	if err := json.Unmarshal([]byte(trimmed), &payloadCandidate); err != nil {
+		return "", false
+	}
+	_, hasProjectID := payloadCandidate["projectId"]
+	_, hasSessionID := payloadCandidate["sessionId"]
+	if hasProjectID && hasSessionID {
+		return trimmed, true
+	}
+	return "", false
 }
 
 func (p *RedisProducer) ensureStreamQueues(ctx context.Context) error {
