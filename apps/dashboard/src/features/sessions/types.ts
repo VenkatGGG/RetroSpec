@@ -35,7 +35,7 @@ export interface SessionReportCard {
   id: string;
   projectId: string;
   sessionId: string;
-  status: "pending" | "ready" | "failed";
+  status: "pending" | "ready" | "failed" | "discarded";
   symptom: string;
   technicalRootCause: string;
   suggestedFix: string;
@@ -87,7 +87,7 @@ export interface IssueClusterSession {
   durationMs: number;
   lastObservedAt: string;
   markerCount: number;
-  reportStatus: "pending" | "ready" | "failed" | string;
+  reportStatus: "pending" | "ready" | "failed" | "discarded" | string;
   reportConfidence: number;
   reportSymptom: string;
 }

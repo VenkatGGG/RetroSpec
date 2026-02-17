@@ -18,7 +18,7 @@ export interface AnalysisJobData {
 export interface AnalysisReport {
   projectId: string;
   sessionId: string;
-  status: "pending" | "ready" | "failed";
+  status: "pending" | "ready" | "failed" | "discarded";
   symptom: string;
   technicalRootCause: string;
   suggestedFix: string;

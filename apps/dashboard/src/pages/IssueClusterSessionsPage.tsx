@@ -5,7 +5,9 @@ import { useGetIssueSessionsQuery } from "../features/reporting/reportingApi";
 export function IssueClusterSessionsPage() {
   const { clusterKey } = useParams();
   const decodedClusterKey = clusterKey ? decodeURIComponent(clusterKey) : "";
-  const [reportStatus, setReportStatus] = useState<"" | "pending" | "ready" | "failed">("");
+  const [reportStatus, setReportStatus] = useState<
+    "" | "pending" | "ready" | "failed" | "discarded"
+  >("");
   const [minConfidencePercent, setMinConfidencePercent] = useState(0);
   const minConfidence = useMemo(
     () => Math.max(0, Math.min(100, minConfidencePercent)) / 100,
@@ -46,13 +48,16 @@ export function IssueClusterSessionsPage() {
           id="report-status-select"
           value={reportStatus}
           onChange={(event) =>
-            setReportStatus(event.target.value as "" | "pending" | "ready" | "failed")
+            setReportStatus(
+              event.target.value as "" | "pending" | "ready" | "failed" | "discarded",
+            )
           }
         >
           <option value="">All</option>
           <option value="ready">ready</option>
           <option value="pending">pending</option>
           <option value="failed">failed</option>
+          <option value="discarded">discarded</option>
         </select>
         <label htmlFor="min-confidence-input">Min Confidence %</label>
         <input

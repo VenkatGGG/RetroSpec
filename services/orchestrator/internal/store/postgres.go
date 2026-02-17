@@ -1049,7 +1049,7 @@ func normalizeMarkerKind(kind string) string {
 
 func normalizeReportStatus(status string) string {
 	switch strings.TrimSpace(status) {
-	case "pending", "ready", "failed":
+	case "pending", "ready", "failed", "discarded":
 		return strings.TrimSpace(status)
 	default:
 		return "pending"
@@ -1058,7 +1058,7 @@ func normalizeReportStatus(status string) string {
 
 func normalizeReportStatusFilter(status string) string {
 	switch strings.TrimSpace(status) {
-	case "", "pending", "ready", "failed":
+	case "", "pending", "ready", "failed", "discarded":
 		return strings.TrimSpace(status)
 	default:
 		return ""

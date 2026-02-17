@@ -523,8 +523,8 @@ func (h *Handler) listIssueSessions(w http.ResponseWriter, r *http.Request) {
 		limit = parsed
 	}
 	reportStatus := strings.TrimSpace(r.URL.Query().Get("reportStatus"))
-	if reportStatus != "" && reportStatus != "pending" && reportStatus != "ready" && reportStatus != "failed" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reportStatus must be one of: pending, ready, failed"})
+	if reportStatus != "" && reportStatus != "pending" && reportStatus != "ready" && reportStatus != "failed" && reportStatus != "discarded" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reportStatus must be one of: pending, ready, failed, discarded"})
 		return
 	}
 	minConfidence := 0.0

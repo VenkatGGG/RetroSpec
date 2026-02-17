@@ -235,6 +235,25 @@ function mergeDualPathReport(
   };
 }
 
+function applyConfidenceGate(report: AnalysisReport, config: AnalyzerWorkerConfig): AnalysisReport {
+  if (!config.discardUncertain) {
+    return report;
+  }
+  if (report.status !== "ready") {
+    return report;
+  }
+  if (report.confidence >= config.minAcceptConfidence) {
+    return report;
+  }
+
+  return {
+    ...report,
+    status: "discarded",
+    textSummary: `${report.textSummary} Discarded: confidence ${report.confidence.toFixed(2)} below threshold ${config.minAcceptConfidence.toFixed(2)}.`,
+    visualSummary: `${report.visualSummary} Report marked as discarded to avoid low-certainty false positives.`,
+  };
+}
+
 export async function generateAnalysisReport(
   job: AnalysisJobData,
   rawEvents: unknown,
@@ -243,7 +262,7 @@ export async function generateAnalysisReport(
 ): Promise<AnalysisReport> {
   const baseline = analyzeSession(job, rawEvents, generatedAt);
   if (config.provider !== "dual_http") {
-    return baseline;
+    return applyConfidenceGate(baseline, config);
   }
 
   const [textResult, visualResult] = await Promise.allSettled([
@@ -256,16 +275,16 @@ export async function generateAnalysisReport(
 
   if (!textPath && !visualPath) {
     if (config.fallbackToHeuristic) {
-      return {
+      return applyConfidenceGate({
         ...baseline,
         textSummary: `${baseline.textSummary} Text path source: heuristic fallback (remote unavailable).`,
         visualSummary: `${baseline.visualSummary} Visual path source: heuristic fallback (remote unavailable).`,
-      };
+      }, config);
     }
     const textError = textResult.status === "rejected" ? textResult.reason : "unknown";
     const visualError = visualResult.status === "rejected" ? visualResult.reason : "unknown";
     throw new Error(`dual_http provider failed text=${String(textError)} visual=${String(visualError)}`);
   }
 
-  return mergeDualPathReport(baseline, textPath, visualPath);
+  return applyConfidenceGate(mergeDualPathReport(baseline, textPath, visualPath), config);
 }

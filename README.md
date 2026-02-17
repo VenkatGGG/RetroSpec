@@ -62,6 +62,7 @@ For `dual_http`, configure:
 - `ANALYZER_VISUAL_MODEL_ENDPOINT` (visual path, e.g. StreamingVLM service)
 - `ANALYZER_MODEL_API_KEY` (optional bearer token)
 - `ANALYZER_MODEL_TIMEOUT_MS` and `ANALYZER_FALLBACK_TO_HEURISTIC`
+Use `ANALYZER_MIN_ACCEPT_CONFIDENCE` + `ANALYZER_DISCARD_UNCERTAIN=true` to discard low-confidence AI verdicts instead of surfacing them as ready reports.
 Set `ARTIFACT_TOKEN_SECRET` to enable short-lived signed artifact playback tokens (defaults to `INTERNAL_API_KEY` if omitted).
 Set `REPLAY_RENDER_ENABLED=true` on the replay worker to render full-session `.webm` assets via Playwright.
 Replay worker retries failed jobs automatically (`REPLAY_MAX_ATTEMPTS`, `REPLAY_RETRY_BASE_MS`) before dead-lettering.

@@ -20,6 +20,8 @@ Async worker that consumes `analysis-jobs` from Redis and writes per-session rep
 - `ANALYZER_MODEL_API_KEY` (optional bearer auth)
 - `ANALYZER_MODEL_TIMEOUT_MS` (default 20000)
 - `ANALYZER_FALLBACK_TO_HEURISTIC=true|false`
+- `ANALYZER_MIN_ACCEPT_CONFIDENCE` (default 0.6)
+- `ANALYZER_DISCARD_UNCERTAIN=true|false` (marks low-confidence reports as `discarded`)
 
 ## Next Step
 

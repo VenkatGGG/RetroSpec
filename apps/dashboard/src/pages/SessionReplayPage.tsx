@@ -105,6 +105,11 @@ export function SessionReplayPage() {
               {reportCard.technicalRootCause || "Analysis worker failed before producing a report."}
             </p>
           )}
+          {reportCard.status === "discarded" && (
+            <p className="replay-status">
+              This report was discarded due to low confidence and is not treated as a high-signal verdict.
+            </p>
+          )}
           {reportCard.status === "ready" && (
             <div className="report-grid">
               <p>
