@@ -44,12 +44,14 @@ type stubQueueDeadLetterInspector struct {
 	result    queue.DeadLetterListResult
 	err       error
 	queueKind queue.DeadLetterQueueKind
+	scope     queue.DeadLetterScope
 	offset    int
 	limit     int
 }
 
-func (s *stubQueueDeadLetterInspector) ListDeadLetters(_ context.Context, queueKind queue.DeadLetterQueueKind, offset int, limit int) (queue.DeadLetterListResult, error) {
+func (s *stubQueueDeadLetterInspector) ListDeadLetters(_ context.Context, queueKind queue.DeadLetterQueueKind, scope queue.DeadLetterScope, offset int, limit int) (queue.DeadLetterListResult, error) {
 	s.queueKind = queueKind
+	s.scope = scope
 	s.offset = offset
 	s.limit = limit
 	if s.err != nil {
@@ -314,10 +316,26 @@ func TestGetQueueDeadLettersRejectsInvalidQueueKind(t *testing.T) {
 	}
 }
 
+func TestGetQueueDeadLettersRejectsInvalidScope(t *testing.T) {
+	inspector := &stubQueueDeadLetterInspector{}
+	handler := &Handler{
+		queueDeadLetterInspector: inspector,
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/queue-dead-letters?queue=replay&scope=invalid", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.getQueueDeadLetters(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+}
+
 func TestGetQueueDeadLettersSuccess(t *testing.T) {
 	inspector := &stubQueueDeadLetterInspector{
 		result: queue.DeadLetterListResult{
 			QueueKind: queue.DeadLetterQueueReplay,
+			Scope:     queue.DeadLetterScopeFailed,
 			Offset:    10,
 			Limit:     10,
 			Total:     12,
@@ -338,7 +356,7 @@ func TestGetQueueDeadLettersSuccess(t *testing.T) {
 	handler := &Handler{
 		queueDeadLetterInspector: inspector,
 	}
-	request := httptest.NewRequest(http.MethodGet, "/v1/admin/queue-dead-letters?queue=replay&offset=10&limit=10", nil)
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/queue-dead-letters?queue=replay&scope=failed&offset=10&limit=10", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.getQueueDeadLetters(recorder, request)
@@ -351,6 +369,9 @@ func TestGetQueueDeadLettersSuccess(t *testing.T) {
 	}
 	if inspector.limit != 10 {
 		t.Fatalf("expected limit=10, got %d", inspector.limit)
+	}
+	if inspector.scope != queue.DeadLetterScopeFailed {
+		t.Fatalf("expected scope=failed, got %s", inspector.scope)
 	}
 	if inspector.offset != 10 {
 		t.Fatalf("expected offset=10, got %d", inspector.offset)

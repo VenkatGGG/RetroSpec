@@ -520,6 +520,11 @@ func (h *Handler) getQueueDeadLetters(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "queue query must be replay or analysis"})
 		return
 	}
+	scope, ok := parseDeadLetterScope(r.URL.Query().Get("scope"))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope query must be failed or unprocessable"})
+		return
+	}
 
 	limit := 25
 	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
@@ -552,7 +557,7 @@ func (h *Handler) getQueueDeadLetters(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 
-	result, err := h.queueDeadLetterInspector.ListDeadLetters(ctx, queueKind, offset, limit)
+	result, err := h.queueDeadLetterInspector.ListDeadLetters(ctx, queueKind, scope, offset, limit)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "dead-letter lookup failed"})
 		return

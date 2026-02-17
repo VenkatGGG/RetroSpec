@@ -62,6 +62,7 @@ type DeadLetterEntry struct {
 
 type DeadLetterListResult struct {
 	QueueKind  DeadLetterQueueKind `json:"queueKind"`
+	Scope      DeadLetterScope     `json:"scope"`
 	Offset     int                 `json:"offset"`
 	Limit      int                 `json:"limit"`
 	Total      int64               `json:"total"`
@@ -99,7 +100,7 @@ type DeadLetterRedriver interface {
 }
 
 type DeadLetterInspector interface {
-	ListDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, offset int, limit int) (DeadLetterListResult, error)
+	ListDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, scope DeadLetterScope, offset int, limit int) (DeadLetterListResult, error)
 }
 
 type DeadLetterPurger interface {
@@ -135,9 +136,13 @@ func (p *NoopProducer) RedriveDeadLetters(_ context.Context, queueKind DeadLette
 	}, nil
 }
 
-func (p *NoopProducer) ListDeadLetters(_ context.Context, queueKind DeadLetterQueueKind, offset int, limit int) (DeadLetterListResult, error) {
+func (p *NoopProducer) ListDeadLetters(_ context.Context, queueKind DeadLetterQueueKind, scope DeadLetterScope, offset int, limit int) (DeadLetterListResult, error) {
+	if scope == "" {
+		scope = DeadLetterScopeFailed
+	}
 	return DeadLetterListResult{
 		QueueKind: queueKind,
+		Scope:     scope,
 		Offset:    offset,
 		Limit:     limit,
 	}, nil

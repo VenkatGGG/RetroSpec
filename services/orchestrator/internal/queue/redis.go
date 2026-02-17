@@ -185,7 +185,7 @@ func (p *RedisProducer) RedriveDeadLetters(ctx context.Context, queueKind DeadLe
 	return result, nil
 }
 
-func (p *RedisProducer) ListDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, offset int, limit int) (DeadLetterListResult, error) {
+func (p *RedisProducer) ListDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, scope DeadLetterScope, offset int, limit int) (DeadLetterListResult, error) {
 	if err := p.ensureStreamQueues(ctx); err != nil {
 		return DeadLetterListResult{}, err
 	}
@@ -207,10 +207,13 @@ func (p *RedisProducer) ListDeadLetters(ctx context.Context, queueKind DeadLette
 		normalizedOffset = 0
 	}
 
-	failedKey := queueName + ":failed"
+	scopeKey, err := deadLetterScopeKey(queueName, scope)
+	if err != nil {
+		return DeadLetterListResult{}, err
+	}
 	rows, err := p.client.LRange(
 		ctx,
-		failedKey,
+		scopeKey,
 		int64(normalizedOffset),
 		int64(normalizedOffset+normalizedLimit-1),
 	).Result()
@@ -221,7 +224,7 @@ func (p *RedisProducer) ListDeadLetters(ctx context.Context, queueKind DeadLette
 		rows = []string{}
 	}
 
-	total, err := p.client.LLen(ctx, failedKey).Result()
+	total, err := p.client.LLen(ctx, scopeKey).Result()
 	if err != nil && err != redis.Nil {
 		return DeadLetterListResult{}, fmt.Errorf("dead-letter depth: %w", err)
 	}
@@ -229,12 +232,17 @@ func (p *RedisProducer) ListDeadLetters(ctx context.Context, queueKind DeadLette
 		total = 0
 	}
 
-	unparsable, err := p.client.LLen(ctx, failedKey+":unprocessable").Result()
-	if err != nil && err != redis.Nil {
-		return DeadLetterListResult{}, fmt.Errorf("dead-letter unparsable depth: %w", err)
-	}
-	if errors.Is(err, redis.Nil) {
-		unparsable = 0
+	unparsable := int64(0)
+	if scope == DeadLetterScopeUnprocessable {
+		unparsable = total
+	} else {
+		unparsable, err = p.client.LLen(ctx, queueName+":failed:unprocessable").Result()
+		if err != nil && err != redis.Nil {
+			return DeadLetterListResult{}, fmt.Errorf("dead-letter unparsable depth: %w", err)
+		}
+		if errors.Is(err, redis.Nil) {
+			unparsable = 0
+		}
 	}
 
 	entries := make([]DeadLetterEntry, 0, len(rows))
@@ -244,6 +252,7 @@ func (p *RedisProducer) ListDeadLetters(ctx context.Context, queueKind DeadLette
 
 	return DeadLetterListResult{
 		QueueKind:  queueKind,
+		Scope:      scope,
 		Offset:     normalizedOffset,
 		Limit:      normalizedLimit,
 		Total:      total,

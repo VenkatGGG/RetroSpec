@@ -57,6 +57,7 @@ export interface QueueDeadLetterEntry {
 
 export interface QueueDeadLetterListResult {
   queueKind: "replay" | "analysis";
+  scope: "failed" | "unprocessable";
   offset: number;
   limit: number;
   total: number;
@@ -392,11 +393,19 @@ export const reportingApi = createApi({
     }),
     getQueueDeadLetters: builder.query<
       QueueDeadLetterListResult,
-      { queue: "replay" | "analysis"; offset?: number; limit?: number }
+      {
+        queue: "replay" | "analysis";
+        scope?: "failed" | "unprocessable";
+        offset?: number;
+        limit?: number;
+      }
     >({
-      query: ({ queue, offset, limit }) => {
+      query: ({ queue, scope, offset, limit }) => {
         const query = new URLSearchParams();
         query.set("queue", queue);
+        if (typeof scope === "string") {
+          query.set("scope", scope);
+        }
         if (typeof offset === "number") {
           query.set("offset", String(offset));
         }

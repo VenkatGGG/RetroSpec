@@ -18,6 +18,7 @@ export function AdminPage() {
   const [projectId, setProjectId] = useState("");
   const [newKeyLabel, setNewKeyLabel] = useState("rotation-key");
   const [deadLetterQueue, setDeadLetterQueue] = useState<"replay" | "analysis">("replay");
+  const [deadLetterScope, setDeadLetterScope] = useState<"failed" | "unprocessable">("failed");
   const [deadLetterLimit, setDeadLetterLimit] = useState("20");
   const [deadLetterOffset, setDeadLetterOffset] = useState(0);
   const [redriveLimit, setRedriveLimit] = useState("25");
@@ -46,6 +47,7 @@ export function AdminPage() {
   } = useGetQueueDeadLettersQuery(
     {
       queue: deadLetterQueue,
+      scope: deadLetterScope,
       offset: deadLetterOffset,
       limit: normalizedDeadLetterLimit,
     },
@@ -228,6 +230,20 @@ export function AdminPage() {
                   setDeadLetterOffset(0);
                 }}
               />
+              <label htmlFor="dead-letter-scope">Scope</label>
+              <select
+                id="dead-letter-scope"
+                value={deadLetterScope}
+                onChange={(event) => {
+                  setDeadLetterScope(
+                    event.target.value === "unprocessable" ? "unprocessable" : "failed",
+                  );
+                  setDeadLetterOffset(0);
+                }}
+              >
+                <option value="failed">Failed</option>
+                <option value="unprocessable">Unparsable</option>
+              </select>
               <button
                 type="button"
                 onClick={() => void refetchDeadLetters()}
@@ -270,8 +286,9 @@ export function AdminPage() {
               <div className="dead-letter-list">
                 <p>
                   Showing {deadLetters.entries.length} of {deadLetters.total} dead-letter entries
-                  for <strong>{deadLetters.queueKind}</strong> queue. Unparsable backlog:{" "}
-                  {deadLetters.unparsable}. Window offset: {deadLetters.offset}.
+                  for <strong>{deadLetters.queueKind}</strong> queue (<strong>{deadLetters.scope}</strong>{" "}
+                  scope). Unparsable backlog: {deadLetters.unparsable}. Window offset:{" "}
+                  {deadLetters.offset}.
                 </p>
                 {deadLetters.entries.length === 0 && (
                   <p className="replay-status">No dead-letter entries for this queue.</p>

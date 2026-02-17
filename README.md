@@ -58,7 +58,7 @@ Set `VITE_API_BASE_URL` to point the dashboard at your orchestrator service (def
 If backend write auth is enabled, set `VITE_INGEST_API_KEY` so dashboard actions can call protected endpoints.
 Set `ADMIN_API_KEY` on the orchestrator to enable project/key management endpoints.
 Admin access also provides `GET /v1/admin/queue-health` for queue backlog status snapshots.
-Admin access also provides `GET /v1/admin/queue-dead-letters?queue=replay&offset=0&limit=25` for dead-letter inspection.
+Admin access also provides `GET /v1/admin/queue-dead-letters?queue=replay&scope=failed&offset=0&limit=25` for dead-letter inspection.
 Admin access also provides `POST /v1/admin/queue-dead-letters/purge` for dead-letter cleanup (`failed` or `unprocessable` scope).
 Admin access also provides `POST /v1/admin/queue-redrive` to re-drive replay/analysis dead-letter jobs back into stream processing.
 Set `VITE_ADMIN_API_KEY` in the dashboard to use `/admin` controls from the UI.

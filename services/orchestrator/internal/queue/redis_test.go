@@ -337,12 +337,17 @@ func TestRedisProducerListDeadLetters(t *testing.T) {
 		t.Fatalf("seed unparsable replay entry: %v", err)
 	}
 
-	result, err := producer.ListDeadLetters(ctx, DeadLetterQueueReplay, 0, 10)
+	result, err := producer.ListDeadLetters(ctx, DeadLetterQueueReplay, DeadLetterScopeFailed, 0, 10)
 	if err != nil {
 		t.Fatalf("list dead-letters failed: %v", err)
 	}
 
-	if result.QueueKind != DeadLetterQueueReplay || result.Offset != 0 || result.Limit != 10 || result.Total != 2 || result.Unparsable != 1 {
+	if result.QueueKind != DeadLetterQueueReplay ||
+		result.Scope != DeadLetterScopeFailed ||
+		result.Offset != 0 ||
+		result.Limit != 10 ||
+		result.Total != 2 ||
+		result.Unparsable != 1 {
 		t.Fatalf("unexpected list result summary: %+v", result)
 	}
 	if len(result.Entries) != 2 {
@@ -356,7 +361,7 @@ func TestRedisProducerListDeadLetters(t *testing.T) {
 		t.Fatalf("unexpected second entry metadata: %+v", result.Entries[1])
 	}
 
-	pagedResult, err := producer.ListDeadLetters(ctx, DeadLetterQueueReplay, 1, 1)
+	pagedResult, err := producer.ListDeadLetters(ctx, DeadLetterQueueReplay, DeadLetterScopeFailed, 1, 1)
 	if err != nil {
 		t.Fatalf("list dead-letters page failed: %v", err)
 	}
@@ -365,6 +370,17 @@ func TestRedisProducerListDeadLetters(t *testing.T) {
 	}
 	if pagedResult.Entries[0].SessionID != "session-old" {
 		t.Fatalf("expected second row on page offset=1, got %+v", pagedResult.Entries[0])
+	}
+
+	unparsableResult, err := producer.ListDeadLetters(ctx, DeadLetterQueueReplay, DeadLetterScopeUnprocessable, 0, 10)
+	if err != nil {
+		t.Fatalf("list unprocessable dead-letters failed: %v", err)
+	}
+	if unparsableResult.Scope != DeadLetterScopeUnprocessable || unparsableResult.Total != 1 || unparsableResult.Unparsable != 1 {
+		t.Fatalf("unexpected unprocessable list result summary: %+v", unparsableResult)
+	}
+	if len(unparsableResult.Entries) != 1 || unparsableResult.Entries[0].SessionID != "" {
+		t.Fatalf("unexpected unprocessable row payload: %+v", unparsableResult.Entries)
 	}
 }
 
