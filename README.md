@@ -14,6 +14,7 @@ RetroSpec is an async web reliability platform that captures browser session eve
 - `apps/dashboard` React + Redux Toolkit dashboard.
 - `services/orchestrator` Go service for ingest, clustering, and reporting.
 - `workers/replay` Async replay/analysis worker (rrweb + media pipeline).
+- `workers/analyzer` Async report-card worker (text/visual verdict scaffold).
 - `packages/sdk` Browser capture SDK for third-party website integration.
 - `infra` Docker and local infra manifests.
 
@@ -35,12 +36,14 @@ RetroSpec is an async web reliability platform that captures browser session eve
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/002_issue_cluster_representative_session.sql`
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/003_projects_and_project_api_keys.sql`
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/004_session_artifacts.sql`
+   - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/005_session_report_cards.sql`
 4. Start services:
    - `npm install`
    - `npx playwright install chromium` (required only if `REPLAY_RENDER_ENABLED=true`)
    - `npm run dev -w apps/dashboard`
    - `go run ./services/orchestrator/cmd/api`
    - `npm run dev -w workers/replay`
+   - `npm run dev -w workers/analyzer`
 
 ## Dashboard API
 
@@ -49,7 +52,9 @@ If backend write auth is enabled, set `VITE_INGEST_API_KEY` so dashboard actions
 Set `ADMIN_API_KEY` on the orchestrator to enable project/key management endpoints.
 Set `VITE_ADMIN_API_KEY` in the dashboard to use `/admin` controls from the UI.
 Set `INTERNAL_API_KEY` on both orchestrator and replay worker so async replay jobs can persist artifact metadata.
+Set `INTERNAL_API_KEY` on analyzer worker so report-card callbacks are authorized.
 Set `ORCHESTRATOR_BASE_URL` for the replay worker callback target (default `http://localhost:8080`).
+Set `ANALYSIS_QUEUE_NAME` and analyzer retry envs (`ANALYZER_MAX_ATTEMPTS`, `ANALYZER_RETRY_BASE_MS`, `ANALYZER_DEDUPE_WINDOW_SEC`) for the analyzer queue.
 Set `ARTIFACT_TOKEN_SECRET` to enable short-lived signed artifact playback tokens (defaults to `INTERNAL_API_KEY` if omitted).
 Set `REPLAY_RENDER_ENABLED=true` on the replay worker to render full-session `.webm` assets via Playwright.
 Replay worker retries failed jobs automatically (`REPLAY_MAX_ATTEMPTS`, `REPLAY_RETRY_BASE_MS`) before dead-lettering.
@@ -59,6 +64,7 @@ API rate limiting is configurable with `RATE_LIMIT_REQUESTS_PER_SEC` and `RATE_L
 The orchestrator exposes Prometheus-style counters at `GET /metrics`.
 Optional background maintenance loops can be enabled with `AUTO_CLEANUP_INTERVAL_MINUTES` and `AUTO_PROMOTE_INTERVAL_MINUTES`.
 Issue trend stats are available at `GET /v1/issues/stats?hours=24`.
+Session-level AI report cards are available on `GET /v1/sessions/{sessionID}` under `reportCard`.
 
 ## Website Integration (SDK)
 

@@ -9,6 +9,8 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 - `GET /v1/admin/projects`
 - `POST /v1/admin/projects/{projectID}/keys`
 - `GET /v1/admin/projects/{projectID}/keys`
+- `POST /v1/internal/replay-results`
+- `POST /v1/internal/analysis-reports`
 - `POST /v1/artifacts/session-events`
 - `POST /v1/ingest/session`
 - `POST /v1/issues/promote`
@@ -23,6 +25,8 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 2. Apply SQL in `db/migrations/001_init.sql`.
 3. Apply SQL in `db/migrations/002_issue_cluster_representative_session.sql`.
 4. Apply SQL in `db/migrations/003_projects_and_project_api_keys.sql`.
+5. Apply SQL in `db/migrations/004_session_artifacts.sql`.
+6. Apply SQL in `db/migrations/005_session_report_cards.sql`.
 5. Start API:
 
 ```bash
@@ -32,8 +36,10 @@ go run ./cmd/api
 ## Notes
 
 - `POST /v1/ingest/session` persists session metadata and queues replay jobs in Redis.
+- `POST /v1/ingest/session` also queues analysis jobs and creates a pending session report-card row.
 - `POST /v1/artifacts/session-events` stores rrweb event JSON and returns `eventsObjectKey` for session ingest.
 - Session event payloads are loaded from S3-compatible storage via the configured `S3_*` environment variables.
+- Internal worker callbacks (`/v1/internal/*`) require `INTERNAL_API_KEY` via `X-Retrospec-Internal`.
 - `POST /v1/maintenance/cleanup` removes data older than `SESSION_RETENTION_DAYS` (default 7), prunes orphan issue clusters, and deletes expired event objects from S3 when artifact storage is configured.
 - CORS origins are controlled with `CORS_ALLOWED_ORIGINS` (comma-separated, default `*`) for SDK calls from customer domains.
 - Data is project-scoped. Requests with `X-Retrospec-Key` are mapped to a project via `project_api_keys`.
