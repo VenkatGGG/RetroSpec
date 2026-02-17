@@ -228,6 +228,7 @@ async function reportFailure(
 
 async function handleMessage(message: StreamMessage): Promise<void> {
   let parsed: z.infer<typeof analysisJobSchema> | null = null;
+  let shouldAcknowledge = false;
   try {
     parsed = analysisJobSchema.parse(JSON.parse(message.payload));
     const doneKey = dedupeKey(parsed);
@@ -236,6 +237,7 @@ async function handleMessage(message: StreamMessage): Promise<void> {
       console.info(
         `[analyzer-worker] skipped duplicate session=${parsed.sessionId} project=${parsed.projectId} attempt=${parsed.attempt}`,
       );
+      shouldAcknowledge = true;
       return;
     }
 
@@ -244,6 +246,7 @@ async function handleMessage(message: StreamMessage): Promise<void> {
     const report = await generateAnalysisReport(parsed, rawEvents, generatedAt, config);
     await reportAnalysisCard(config, report);
     await redis.set(doneKey, report.generatedAt, "EX", Math.max(60, config.dedupeWindowSec));
+    shouldAcknowledge = true;
 
     console.info(
       `[analyzer-worker] processed session=${parsed.sessionId} project=${parsed.projectId} confidence=${report.confidence.toFixed(2)} status=${report.status}`,
@@ -259,6 +262,7 @@ async function handleMessage(message: StreamMessage): Promise<void> {
       console.warn(
         `[analyzer-worker] scheduled retry session=${parsed.sessionId} attempt=${nextAttempt}`,
       );
+      shouldAcknowledge = true;
     } else {
       await redis.lpush(
         failedQueueName,
@@ -269,16 +273,23 @@ async function handleMessage(message: StreamMessage): Promise<void> {
           payload: message.payload,
         }),
       );
+      shouldAcknowledge = true;
       if (parsed) {
         await reportFailure(parsed, details);
       }
     }
   } finally {
-    try {
-      await acknowledgeMessage(message.id);
-    } catch (ackError) {
-      const details = ackError instanceof Error ? ackError.message : String(ackError);
-      console.error(`[analyzer-worker] message ack failed id=${message.id} err=${details}`);
+    if (shouldAcknowledge) {
+      try {
+        await acknowledgeMessage(message.id);
+      } catch (ackError) {
+        const details = ackError instanceof Error ? ackError.message : String(ackError);
+        console.error(`[analyzer-worker] message ack failed id=${message.id} err=${details}`);
+      }
+    } else {
+      console.warn(
+        `[analyzer-worker] message left pending id=${message.id} for reclaim`,
+      );
     }
   }
 }

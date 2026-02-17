@@ -194,6 +194,7 @@ async function acknowledgeMessage(messageID: string): Promise<void> {
 
 async function handleMessage(message: StreamMessage): Promise<void> {
   let parsed: z.infer<typeof replayJobSchema> | null = null;
+  let shouldAcknowledge = false;
 
   try {
     parsed = replayJobSchema.parse(JSON.parse(message.payload));
@@ -203,6 +204,7 @@ async function handleMessage(message: StreamMessage): Promise<void> {
       console.info(
         `[replay-worker] skipped duplicate session=${parsed.sessionId} project=${parsed.projectId} attempt=${parsed.attempt}`,
       );
+      shouldAcknowledge = true;
       return;
     }
 
@@ -241,6 +243,7 @@ async function handleMessage(message: StreamMessage): Promise<void> {
       });
     }
     await redis.set(doneKey, result.generatedAt, "EX", Math.max(60, config.dedupeWindowSec));
+    shouldAcknowledge = true;
 
     console.info(
       `[replay-worker] processed session=${result.sessionId} project=${parsed.projectId} analysis=${result.artifactKey} videoStatus=${result.videoStatus} video=${result.videoArtifactKey ?? "none"}`,
@@ -256,6 +259,7 @@ async function handleMessage(message: StreamMessage): Promise<void> {
       console.warn(
         `[replay-worker] scheduled retry session=${parsed.sessionId} attempt=${nextAttempt}`,
       );
+      shouldAcknowledge = true;
     } else {
       await redis.lpush(
         failedQueueName,
@@ -266,13 +270,20 @@ async function handleMessage(message: StreamMessage): Promise<void> {
           payload: message.payload,
         }),
       );
+      shouldAcknowledge = true;
     }
   } finally {
-    try {
-      await acknowledgeMessage(message.id);
-    } catch (ackError) {
-      const details = ackError instanceof Error ? ackError.message : String(ackError);
-      console.error(`[replay-worker] message ack failed id=${message.id} err=${details}`);
+    if (shouldAcknowledge) {
+      try {
+        await acknowledgeMessage(message.id);
+      } catch (ackError) {
+        const details = ackError instanceof Error ? ackError.message : String(ackError);
+        console.error(`[replay-worker] message ack failed id=${message.id} err=${details}`);
+      }
+    } else {
+      console.warn(
+        `[replay-worker] message left pending id=${message.id} for reclaim`,
+      );
     }
   }
 }
