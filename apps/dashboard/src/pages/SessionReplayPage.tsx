@@ -22,7 +22,11 @@ export function SessionReplayPage() {
     data: activeSession,
     isLoading,
     isError,
-  } = useGetSessionQuery(sessionId ?? "", { skip: !sessionId });
+  } = useGetSessionQuery(sessionId ?? "", {
+    skip: !sessionId,
+    pollingInterval: sessionId ? 10_000 : 0,
+    refetchOnMountOrArgChange: true,
+  });
   const {
     data: replayEvents = [],
     isLoading: isEventsLoading,

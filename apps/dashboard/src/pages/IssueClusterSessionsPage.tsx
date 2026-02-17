@@ -10,7 +10,11 @@ export function IssueClusterSessionsPage() {
     isError,
   } = useGetIssueSessionsQuery(
     { clusterKey: decodedClusterKey, limit: 50 },
-    { skip: !decodedClusterKey },
+    {
+      skip: !decodedClusterKey,
+      pollingInterval: decodedClusterKey ? 15_000 : 0,
+      refetchOnMountOrArgChange: true,
+    },
   );
 
   return (
