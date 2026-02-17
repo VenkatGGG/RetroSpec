@@ -19,6 +19,7 @@ const queueName = config.queueName;
 const failedQueueName = `${config.queueName}:failed`;
 const retryQueueName = `${config.queueName}:retry`;
 const processingQueueName = `${config.queueName}:processing`;
+const processingIndexKey = `${config.queueName}:processing:index`;
 
 const redis = new Redis({
   host: config.redisHost,
@@ -85,6 +86,25 @@ async function recoverInFlightJobs(): Promise<void> {
   if (moved > 0) {
     console.warn(`[replay-worker] recovered in-flight jobs=${moved}`);
   }
+  await redis.del(processingIndexKey);
+}
+
+async function reclaimStaleProcessingJobs(): Promise<void> {
+  const staleThresholdMs =
+    Date.now() - Math.max(60, Math.floor(config.processingStaleSec)) * 1_000;
+  const stalePayloads = await redis.zrangebyscore(processingIndexKey, 0, staleThresholdMs, "LIMIT", 0, 20);
+  if (stalePayloads.length === 0) {
+    return;
+  }
+
+  const pipeline = redis.multi();
+  for (const payload of stalePayloads) {
+    pipeline.lrem(processingQueueName, 1, payload);
+    pipeline.zrem(processingIndexKey, payload);
+    pipeline.lpush(queueName, payload);
+  }
+  await pipeline.exec();
+  console.warn(`[replay-worker] reclaimed stale in-flight jobs=${stalePayloads.length}`);
 }
 
 async function workerLoop() {
@@ -96,6 +116,7 @@ async function workerLoop() {
     let parsed: z.infer<typeof replayJobSchema> | null = null;
     try {
       await drainRetryQueue();
+      await reclaimStaleProcessingJobs();
 
       const payload = await redis.brpoplpush(queueName, processingQueueName, 5);
       if (!payload) {
@@ -103,6 +124,7 @@ async function workerLoop() {
       }
 
       rawPayload = payload;
+      await redis.zadd(processingIndexKey, Date.now(), rawPayload);
       parsed = replayJobSchema.parse(JSON.parse(rawPayload));
       const doneKey = dedupeKey(parsed);
       const alreadyDone = await redis.get(doneKey);
@@ -179,6 +201,7 @@ async function workerLoop() {
     finally {
       if (rawPayload) {
         await redis.lrem(processingQueueName, 1, rawPayload);
+        await redis.zrem(processingIndexKey, rawPayload);
       }
     }
   }

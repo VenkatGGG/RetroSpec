@@ -12,7 +12,7 @@ Async worker that consumes `analysis-jobs` from Redis and writes per-session rep
 - `dual_http` responses are validated against a strict schema contract before being merged.
 - Remote model payloads are sampled around marker windows and redacted for common sensitive tokens.
 - Reports `pending -> ready/failed` status via `POST /v1/internal/analysis-reports`.
-- Retries failed jobs with exponential backoff, recovers in-flight jobs from a processing queue, and dead-letters exhausted payloads.
+- Retries failed jobs with exponential backoff, recovers in-flight jobs from a processing queue, reclaims stale in-flight jobs (`ANALYZER_PROCESSING_STALE_SEC`), and dead-letters exhausted payloads.
 
 ## Provider Config
 

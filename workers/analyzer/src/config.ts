@@ -12,6 +12,7 @@ export interface AnalyzerWorkerConfig {
   fallbackToHeuristic: boolean;
   minAcceptConfidence: number;
   discardUncertain: boolean;
+  processingStaleSec: number;
   maxAttempts: number;
   retryBaseMs: number;
   dedupeWindowSec: number;
@@ -37,6 +38,7 @@ export function loadConfig(): AnalyzerWorkerConfig {
     fallbackToHeuristic: (process.env.ANALYZER_FALLBACK_TO_HEURISTIC ?? "true").toLowerCase() !== "false",
     minAcceptConfidence: clamp01(envOrDefaultNumber("ANALYZER_MIN_ACCEPT_CONFIDENCE", 0.6)),
     discardUncertain: (process.env.ANALYZER_DISCARD_UNCERTAIN ?? "true").toLowerCase() !== "false",
+    processingStaleSec: envOrDefaultNumber("ANALYZER_PROCESSING_STALE_SEC", 900),
     maxAttempts: envOrDefaultNumber("ANALYZER_MAX_ATTEMPTS", 3),
     retryBaseMs: envOrDefaultNumber("ANALYZER_RETRY_BASE_MS", 2_000),
     dedupeWindowSec: envOrDefaultNumber("ANALYZER_DEDUPE_WINDOW_SEC", 21_600),
