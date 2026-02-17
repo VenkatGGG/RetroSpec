@@ -7,6 +7,7 @@ RetroSpec is an async web reliability platform that captures browser session eve
 - Report recurring failures, do not auto-fix code.
 - Cluster repeated issues across users/sessions before surfacing to developers.
 - Show full session replay and allow jumping directly to error markers.
+- Allow drilling from each promoted cluster to all matching sessions before replay inspection.
 - Keep heavy artifacts short-lived (default 7-day retention).
 
 ## Monorepo Layout

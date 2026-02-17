@@ -15,6 +15,7 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 - `POST /v1/ingest/session`
 - `POST /v1/issues/promote`
 - `GET /v1/issues`
+- `GET /v1/issues/{clusterKey}/sessions`
 - `GET /v1/sessions/{sessionID}`
 - `GET /v1/sessions/{sessionID}/events`
 - `POST /v1/maintenance/cleanup`
@@ -37,6 +38,7 @@ go run ./cmd/api
 
 - `POST /v1/ingest/session` persists session metadata and queues replay jobs in Redis.
 - `POST /v1/ingest/session` also queues analysis jobs and creates a pending session report-card row.
+- `GET /v1/issues/{clusterKey}/sessions` returns the recent sessions mapped to a promoted cluster key, including report-card status/confidence.
 - `POST /v1/artifacts/session-events` stores rrweb event JSON and returns `eventsObjectKey` for session ingest.
 - Session event payloads are loaded from S3-compatible storage via the configured `S3_*` environment variables.
 - Internal worker callbacks (`/v1/internal/*`) require `INTERNAL_API_KEY` via `X-Retrospec-Internal`.
