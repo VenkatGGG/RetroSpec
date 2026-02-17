@@ -31,4 +31,4 @@ window.addEventListener("beforeunload", () => {
 3. Submit metadata + markers to `POST /v1/ingest/session`.
 4. Auto-flush incremental updates periodically and on `pagehide`.
 
-Use a project-specific `apiKey` generated from `POST /v1/admin/projects` for multi-tenant isolation.
+Use an `apiKey` value from your deployment environment (`INGEST_API_KEY`) for authenticated writes.

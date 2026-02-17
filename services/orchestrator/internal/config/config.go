@@ -13,7 +13,6 @@ type Config struct {
 	ReplayQueueName            string
 	AnalysisQueueName          string
 	CORSAllowedOrigins         []string
-	AdminAPIKey                string
 	InternalAPIKey             string
 	IngestAPIKey               string
 	ArtifactTokenSecret        string
@@ -54,7 +53,6 @@ func Load() Config {
 		ReplayQueueName:            envOrDefault("REPLAY_QUEUE_NAME", "replay-jobs"),
 		AnalysisQueueName:          envOrDefault("ANALYSIS_QUEUE_NAME", "analysis-jobs"),
 		CORSAllowedOrigins:         parseCSV(envOrDefault("CORS_ALLOWED_ORIGINS", "*")),
-		AdminAPIKey:                os.Getenv("ADMIN_API_KEY"),
 		InternalAPIKey:             os.Getenv("INTERNAL_API_KEY"),
 		IngestAPIKey:               os.Getenv("INGEST_API_KEY"),
 		ArtifactTokenSecret:        artifactTokenSecret(),

@@ -92,7 +92,6 @@ func main() {
 		producer,
 		artifactStore,
 		cfg.CORSAllowedOrigins,
-		cfg.AdminAPIKey,
 		cfg.InternalAPIKey,
 		cfg.IngestAPIKey,
 		cfg.ClusterPromoteMinSessions,

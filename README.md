@@ -56,12 +56,6 @@ RetroSpec is an async web reliability platform that captures browser session eve
 
 Set `VITE_API_BASE_URL` to point the dashboard at your orchestrator service (default `http://localhost:8080`).
 If backend write auth is enabled, set `VITE_INGEST_API_KEY` so dashboard actions can call protected endpoints.
-Set `ADMIN_API_KEY` on the orchestrator to enable project/key management endpoints.
-Admin access also provides `GET /v1/admin/queue-health` for queue backlog status snapshots.
-Admin access also provides `GET /v1/admin/queue-dead-letters?queue=replay&scope=failed&offset=0&limit=25` for dead-letter inspection.
-Admin access also provides `POST /v1/admin/queue-dead-letters/purge` for dead-letter cleanup (`failed` or `unprocessable` scope).
-Admin access also provides `POST /v1/admin/queue-redrive` to re-drive replay/analysis dead-letter jobs back into stream processing.
-Set `VITE_ADMIN_API_KEY` in the dashboard to use `/admin` controls from the UI.
 Set `INTERNAL_API_KEY` on both orchestrator and replay worker so async replay jobs can persist artifact metadata.
 Set `INTERNAL_API_KEY` on analyzer worker so report-card callbacks are authorized.
 Set `ORCHESTRATOR_BASE_URL` for the replay worker callback target (default `http://localhost:8080`).
@@ -79,17 +73,9 @@ Use `REPLAY_RENDER_DAILY_LIMIT_PER_PROJECT`, `REPLAY_RENDER_DAILY_LIMIT_GLOBAL`,
 Replay worker retries failed jobs automatically (`REPLAY_MAX_ATTEMPTS`, `REPLAY_RETRY_BASE_MS`) before dead-lettering.
 Replay worker deduplicates repeated payloads for a TTL window (`REPLAY_DEDUPE_WINDOW_SEC`).
 Replay/analyzer workers reclaim stale in-flight jobs with `REPLAY_PROCESSING_STALE_SEC` and `ANALYZER_PROCESSING_STALE_SEC`.
-When video rendering fails, the worker still reports `analysis_json` and records a `replay_video` artifact with `failed` status.
 API rate limiting is configurable with `RATE_LIMIT_REQUESTS_PER_SEC` and `RATE_LIMIT_BURST`.
-The orchestrator exposes Prometheus-style counters at `GET /metrics`.
-`/metrics` now also includes queue depth gauges for replay/analyzer stream, pending, retry, and dead-letter backlogs.
-Local Prometheus/Alertmanager configs are available under `infra/monitoring/` with queue and pipeline SLO alert rules.
-Optional background maintenance loops can be enabled with `AUTO_CLEANUP_INTERVAL_MINUTES` and `AUTO_PROMOTE_INTERVAL_MINUTES`.
+Optional background cleanup loop can be enabled with `AUTO_CLEANUP_INTERVAL_MINUTES` (recommended for 7-day retention enforcement).
 Ingest can auto-promote clusters immediately (`AUTO_PROMOTE_ON_INGEST=true`) so repeated issues appear without waiting for scheduled/manual promotion.
-Set `ALERT_WEBHOOK_URL` to send outbound notifications when clusters are promoted above confidence threshold.
-Use `ALERT_AUTH_HEADER`, `ALERT_COOLDOWN_MINUTES`, and `ALERT_MIN_CLUSTER_CONFIDENCE` to control alert auth, dedupe window, and noise floor.
-Tune queue-health severity thresholds with `QUEUE_WARNING_PENDING`, `QUEUE_WARNING_RETRY`, `QUEUE_CRITICAL_PENDING`, `QUEUE_CRITICAL_RETRY`, and `QUEUE_CRITICAL_FAILED`.
-Optionally enforce bucket-level object expiration with `S3_LIFECYCLE_ENABLED`, `S3_LIFECYCLE_EXPIRATION_DAYS`, and `S3_LIFECYCLE_PREFIXES`.
 Issue trend stats are available at `GET /v1/issues/stats?hours=24`.
 Session-level AI report cards are available on `GET /v1/sessions/{sessionID}` under `reportCard`.
 Report cards use statuses: `pending`, `ready`, `failed`, and `discarded` (low-confidence filtered).

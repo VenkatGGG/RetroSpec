@@ -8,89 +8,6 @@ import type {
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const ingestApiKey = import.meta.env.VITE_INGEST_API_KEY;
-const adminApiKey = import.meta.env.VITE_ADMIN_API_KEY;
-
-export interface QueueHealthSnapshot {
-  status: "healthy" | "warning" | "critical";
-  generatedAt: string;
-  replay: {
-    streamDepth: number;
-    pending: number;
-    retryDepth: number;
-    failedDepth: number;
-  };
-  analysis: {
-    streamDepth: number;
-    pending: number;
-    retryDepth: number;
-    failedDepth: number;
-  };
-  thresholds: {
-    warningPending: number;
-    warningRetry: number;
-    criticalPending: number;
-    criticalRetry: number;
-    criticalFailed: number;
-  };
-}
-
-export interface QueueRedriveResult {
-  queueKind: "replay" | "analysis";
-  requested: number;
-  redriven: number;
-  skipped: number;
-  remainingFailed: number;
-}
-
-export interface QueueDeadLetterEntry {
-  failedAt: string;
-  error: string;
-  attempt: number;
-  projectId: string;
-  sessionId: string;
-  triggerKind: string;
-  route: string;
-  site: string;
-  payload: string;
-  raw: string;
-}
-
-export interface QueueDeadLetterListResult {
-  queueKind: "replay" | "analysis";
-  scope: "failed" | "unprocessable";
-  offset: number;
-  limit: number;
-  total: number;
-  unparsable: number;
-  entries: QueueDeadLetterEntry[];
-}
-
-export interface QueueDeadLetterPurgeResult {
-  queueKind: "replay" | "analysis";
-  scope: "failed" | "unprocessable";
-  requested: number;
-  deleted: number;
-  remaining: number;
-}
-
-export interface IssueFeedbackEvent {
-  id: string;
-  projectId: string;
-  clusterKey: string;
-  sessionId?: string;
-  feedbackKind:
-    | "false_positive"
-    | "true_positive"
-    | "invalid"
-    | "suppressed"
-    | "unsuppressed"
-    | "merge"
-    | "split";
-  note: string;
-  metadata?: Record<string, unknown>;
-  createdBy: string;
-  createdAt: string;
-}
 
 export const reportingApi = createApi({
   reducerPath: "reportingApi",
@@ -99,9 +16,6 @@ export const reportingApi = createApi({
     prepareHeaders: (headers) => {
       if (ingestApiKey) {
         headers.set("X-Retrospec-Key", ingestApiKey);
-      }
-      if (adminApiKey) {
-        headers.set("X-Retrospec-Admin", adminApiKey);
       }
       return headers;
     },
@@ -113,7 +27,7 @@ export const reportingApi = createApi({
         stateFilter && stateFilter.trim().length > 0
           ? `/v1/issues?state=${encodeURIComponent(stateFilter.trim())}`
           : "/v1/issues",
-      transformResponse: (response: { issues: IssueCluster[]; state?: string }) => response.issues,
+      transformResponse: (response: { issues: IssueCluster[] }) => response.issues,
       providesTags: (result) =>
         result
           ? [
@@ -161,25 +75,6 @@ export const reportingApi = createApi({
       }) => response,
       providesTags: (_result, _error, args) => [{ type: "Issue", id: `${args.clusterKey}:sessions` }],
     }),
-    listIssueFeedback: builder.query<
-      {
-        clusterKey: string;
-        limit: number;
-        events: IssueFeedbackEvent[];
-      },
-      { clusterKey: string; limit?: number }
-    >({
-      query: ({ clusterKey, limit }) =>
-        typeof limit === "number"
-          ? `/v1/issues/${encodeURIComponent(clusterKey)}/feedback?limit=${limit}`
-          : `/v1/issues/${encodeURIComponent(clusterKey)}/feedback`,
-      transformResponse: (response: {
-        clusterKey: string;
-        limit: number;
-        events: IssueFeedbackEvent[];
-      }) => response,
-      providesTags: (_result, _error, args) => [{ type: "Issue", id: `${args.clusterKey}:feedback` }],
-    }),
     getSession: builder.query<SessionSummary, string>({
       query: (sessionId) => `/v1/sessions/${sessionId}`,
       transformResponse: (response: { session: SessionSummary }) => response.session,
@@ -209,105 +104,6 @@ export const reportingApi = createApi({
       }),
       invalidatesTags: [{ type: "Issue", id: "LIST" }],
     }),
-    updateIssueState: builder.mutation<
-      {
-        state: {
-          projectId: string;
-          clusterKey: string;
-          state: "open" | "acknowledged" | "resolved" | "muted";
-          assignee: string;
-          mutedUntil: string | null;
-          note: string;
-          createdAt: string;
-          updatedAt: string;
-        };
-      },
-      {
-        clusterKey: string;
-        state: "open" | "acknowledged" | "resolved" | "muted";
-        assignee?: string;
-        mutedUntil?: string;
-        note?: string;
-      }
-    >({
-      query: ({ clusterKey, ...body }) => ({
-        url: `/v1/issues/${encodeURIComponent(clusterKey)}/state`,
-        method: "POST",
-        body,
-      }),
-      invalidatesTags: (_result, _error, args) => [
-        { type: "Issue", id: "LIST" },
-        { type: "Issue", id: args.clusterKey },
-        { type: "Issue", id: `${args.clusterKey}:sessions` },
-      ],
-    }),
-    submitIssueFeedback: builder.mutation<
-      { feedback: IssueFeedbackEvent },
-      {
-        clusterKey: string;
-        kind: IssueFeedbackEvent["feedbackKind"];
-        sessionId?: string;
-        note?: string;
-        createdBy?: string;
-        metadata?: Record<string, unknown>;
-      }
-    >({
-      query: ({ clusterKey, ...body }) => ({
-        url: `/v1/issues/${encodeURIComponent(clusterKey)}/feedback`,
-        method: "POST",
-        body,
-      }),
-      invalidatesTags: (_result, _error, args) => [
-        { type: "Issue", id: "LIST" },
-        { type: "Issue", id: args.clusterKey },
-        { type: "Issue", id: `${args.clusterKey}:feedback` },
-      ],
-    }),
-    mergeIssues: builder.mutation<
-      {
-        result: {
-          targetClusterKey: string;
-          sourceClusterKeys: string[];
-          movedMarkerCount: number;
-        };
-      },
-      { targetClusterKey: string; sourceClusterKeys: string[]; note?: string; createdBy?: string }
-    >({
-      query: (payload) => ({
-        url: "/v1/issues/merge",
-        method: "POST",
-        body: payload,
-      }),
-      invalidatesTags: [{ type: "Issue", id: "LIST" }],
-    }),
-    splitIssue: builder.mutation<
-      {
-        result: {
-          sourceClusterKey: string;
-          newClusterKey: string;
-          movedMarkerCount: number;
-        };
-      },
-      {
-        clusterKey: string;
-        newClusterKey?: string;
-        sessionIds: string[];
-        note?: string;
-        createdBy?: string;
-      }
-    >({
-      query: ({ clusterKey, ...body }) => ({
-        url: `/v1/issues/${encodeURIComponent(clusterKey)}/split`,
-        method: "POST",
-        body,
-      }),
-      invalidatesTags: (_result, _error, args) => [
-        { type: "Issue", id: "LIST" },
-        { type: "Issue", id: args.clusterKey },
-        { type: "Issue", id: `${args.clusterKey}:sessions` },
-        { type: "Issue", id: `${args.clusterKey}:feedback` },
-      ],
-    }),
     cleanupData: builder.mutation<
       {
         deletedSessions: number;
@@ -326,123 +122,6 @@ export const reportingApi = createApi({
       }),
       invalidatesTags: [{ type: "Issue", id: "LIST" }],
     }),
-    createProject: builder.mutation<
-      {
-        project: { id: string; name: string; site: string; createdAt: string };
-        apiKey: string;
-      },
-      { name: string; site: string; label: string }
-    >({
-      query: (payload) => ({
-        url: "/v1/admin/projects",
-        method: "POST",
-        body: payload,
-      }),
-      invalidatesTags: [{ type: "Issue", id: "LIST" }],
-    }),
-    listProjects: builder.query<
-      Array<{ id: string; name: string; site: string; createdAt: string }>,
-      void
-    >({
-      query: () => "/v1/admin/projects",
-      transformResponse: (response: {
-        projects: Array<{ id: string; name: string; site: string; createdAt: string }>;
-      }) => response.projects,
-    }),
-    createProjectKey: builder.mutation<
-      {
-        apiKeyId: string;
-        projectId: string;
-        label: string;
-        apiKey: string;
-      },
-      { projectId: string; label: string }
-    >({
-      query: ({ projectId, label }) => ({
-        url: `/v1/admin/projects/${projectId}/keys`,
-        method: "POST",
-        body: { label },
-      }),
-    }),
-    listProjectKeys: builder.query<
-      Array<{
-        id: string;
-        projectId: string;
-        label: string;
-        status: string;
-        createdAt: string;
-        lastUsedAt: string | null;
-      }>,
-      string
-    >({
-      query: (projectId) => `/v1/admin/projects/${projectId}/keys`,
-      transformResponse: (response: {
-        keys: Array<{
-          id: string;
-          projectId: string;
-          label: string;
-          status: string;
-          createdAt: string;
-          lastUsedAt: string | null;
-        }>;
-      }) => response.keys,
-    }),
-    getQueueHealth: builder.query<QueueHealthSnapshot, void>({
-      query: () => "/v1/admin/queue-health",
-      transformResponse: (response: QueueHealthSnapshot) => response,
-    }),
-    getQueueDeadLetters: builder.query<
-      QueueDeadLetterListResult,
-      {
-        queue: "replay" | "analysis";
-        scope?: "failed" | "unprocessable";
-        offset?: number;
-        limit?: number;
-      }
-    >({
-      query: ({ queue, scope, offset, limit }) => {
-        const query = new URLSearchParams();
-        query.set("queue", queue);
-        if (typeof scope === "string") {
-          query.set("scope", scope);
-        }
-        if (typeof offset === "number") {
-          query.set("offset", String(offset));
-        }
-        if (typeof limit === "number") {
-          query.set("limit", String(limit));
-        }
-        return `/v1/admin/queue-dead-letters?${query.toString()}`;
-      },
-      transformResponse: (response: { result: QueueDeadLetterListResult }) => response.result,
-    }),
-    redriveQueueDeadLetters: builder.mutation<
-      { result: QueueRedriveResult },
-      { queue: "replay" | "analysis"; limit?: number }
-    >({
-      query: ({ queue, limit }) => ({
-        url: "/v1/admin/queue-redrive",
-        method: "POST",
-        body: {
-          queue,
-          limit,
-        },
-      }),
-    }),
-    purgeQueueDeadLetters: builder.mutation<
-      { result: QueueDeadLetterPurgeResult },
-      { queue: "replay" | "analysis"; scope?: "failed" | "unprocessable"; limit?: number }
-    >({
-      query: ({ queue, scope, limit }) => ({
-        url: "/v1/admin/queue-dead-letters/purge",
-        method: "POST",
-        body: {
-          queue,
-          scope,
-          limit,
-        },
-      }),
-    }),
   }),
 });
 
@@ -450,22 +129,9 @@ export const {
   useGetIssuesQuery,
   useGetIssueStatsQuery,
   useGetIssueSessionsQuery,
-  useListIssueFeedbackQuery,
   useGetSessionQuery,
   useGetSessionEventsQuery,
   useGetSessionArtifactTokenQuery,
   usePromoteIssuesMutation,
-  useUpdateIssueStateMutation,
-  useSubmitIssueFeedbackMutation,
-  useMergeIssuesMutation,
-  useSplitIssueMutation,
   useCleanupDataMutation,
-  useCreateProjectMutation,
-  useCreateProjectKeyMutation,
-  useGetQueueHealthQuery,
-  useGetQueueDeadLettersQuery,
-  usePurgeQueueDeadLettersMutation,
-  useRedriveQueueDeadLettersMutation,
-  useListProjectsQuery,
-  useListProjectKeysQuery,
 } = reportingApi;

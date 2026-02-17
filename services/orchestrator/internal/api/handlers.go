@@ -29,7 +29,6 @@ type Handler struct {
 	queueDeadLetterInspector queue.DeadLetterInspector
 	queueDeadLetterPurger    queue.DeadLetterPurger
 	corsAllowedOrigins       []string
-	adminAPIKey              string
 	internalAPIKey           string
 	ingestAPIKey             string
 	store                    *store.Postgres
@@ -61,7 +60,6 @@ func NewHandler(
 	replayProducer queue.Producer,
 	artifactStore artifacts.Store,
 	corsAllowedOrigins []string,
-	adminAPIKey string,
 	internalAPIKey string,
 	ingestAPIKey string,
 	clusterPromoteMinSession int,
@@ -109,7 +107,6 @@ func NewHandler(
 		queueDeadLetterPurger:    queueDeadLetterPurger,
 		artifactStore:            artifactStore,
 		corsAllowedOrigins:       corsAllowedOrigins,
-		adminAPIKey:              adminAPIKey,
 		internalAPIKey:           internalAPIKey,
 		ingestAPIKey:             ingestAPIKey,
 		clusterPromoteMinSession: clusterPromoteMinSession,
@@ -143,7 +140,7 @@ func (h *Handler) Router() http.Handler {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   h.corsAllowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Retrospec-Key", "X-Retrospec-Admin", "X-Retrospec-Internal"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Retrospec-Key", "X-Retrospec-Internal"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: false,
 		MaxAge:           300,
@@ -152,16 +149,6 @@ func (h *Handler) Router() http.Handler {
 	r.Get("/healthz", h.healthz)
 	r.Get("/metrics", h.metrics.handleMetrics)
 	r.Route("/v1", func(r chi.Router) {
-		r.Route("/admin", func(r chi.Router) {
-			r.With(h.requireAdminAccess).Get("/projects", h.listProjects)
-			r.With(h.requireAdminAccess).Post("/projects", h.createProject)
-			r.With(h.requireAdminAccess).Get("/projects/{projectID}/keys", h.listProjectAPIKeys)
-			r.With(h.requireAdminAccess).Post("/projects/{projectID}/keys", h.createProjectAPIKey)
-			r.With(h.requireAdminAccess).Get("/queue-health", h.getQueueHealth)
-			r.With(h.requireAdminAccess).Get("/queue-dead-letters", h.getQueueDeadLetters)
-			r.With(h.requireAdminAccess).Post("/queue-dead-letters/purge", h.purgeQueueDeadLetters)
-			r.With(h.requireAdminAccess).Post("/queue-redrive", h.redriveDeadLetters)
-		})
 		r.With(h.requireInternalAccess).Post("/internal/replay-results", h.reportReplayResult)
 		r.With(h.requireInternalAccess).Post("/internal/analysis-reports", h.reportAnalysisResult)
 		r.With(h.withProjectContextAllowQueryKey).Get("/sessions/{sessionID}/artifacts/{artifactType}", h.getSessionArtifact)
@@ -172,11 +159,6 @@ func (h *Handler) Router() http.Handler {
 			r.With(h.requireWriteAccess).Post("/artifacts/session-events", h.uploadSessionEvents)
 			r.With(h.requireWriteAccess).Post("/ingest/session", h.ingestSession)
 			r.With(h.requireWriteAccess).Post("/issues/promote", h.promoteIssues)
-			r.With(h.requireWriteAccess).Post("/issues/{clusterKey}/state", h.updateIssueState)
-			r.With(h.requireWriteAccess).Post("/issues/{clusterKey}/feedback", h.recordIssueFeedback)
-			r.Get("/issues/{clusterKey}/feedback", h.listIssueFeedback)
-			r.With(h.requireWriteAccess).Post("/issues/merge", h.mergeIssues)
-			r.With(h.requireWriteAccess).Post("/issues/{clusterKey}/split", h.splitIssue)
 			r.Get("/issues/stats", h.listIssueStats)
 			r.Get("/issues", h.listIssues)
 			r.Get("/issues/{clusterKey}/sessions", h.listIssueSessions)
@@ -248,8 +230,6 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 	h.metrics.ingestSessionsTotal.Add(1)
 	promotedCount := 0
 	promoteError := ""
-	alertsSent := 0
-	alertErrors := 0
 	if h.autoPromoteOnIngest {
 		promoted, err := h.store.PromoteClusters(r.Context(), stored.ProjectID, h.clusterPromoteMinSession)
 		if err != nil {
@@ -257,7 +237,6 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 			log.Printf("auto-promote on ingest failed session=%s project=%s err=%v", stored.ID, stored.ProjectID, err)
 		} else {
 			promotedCount = len(promoted.Promoted)
-			alertsSent, alertErrors = h.dispatchPromotedIssueAlerts(r.Context(), promoted.Promoted, "ingest_auto_promote")
 		}
 	}
 
@@ -267,8 +246,6 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 		"analysisQueueError": analysisQueueError,
 		"promotedCount":      promotedCount,
 		"promoteError":       promoteError,
-		"alertsSent":         alertsSent,
-		"alertErrors":        alertErrors,
 	})
 }
 
@@ -836,11 +813,8 @@ func (h *Handler) promoteIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	alertsSent, alertErrors := h.dispatchPromotedIssueAlerts(r.Context(), result.Promoted, "manual_promote")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"promoted":    result.Promoted,
-		"alertsSent":  alertsSent,
-		"alertErrors": alertErrors,
+		"promoted": result.Promoted,
 	})
 }
 
@@ -1581,23 +1555,6 @@ func (h *Handler) requireInternalAccess(next http.Handler) http.Handler {
 
 		provided := strings.TrimSpace(r.Header.Get("X-Retrospec-Internal"))
 		if provided == h.internalAPIKey {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-	})
-}
-
-func (h *Handler) requireAdminAccess(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.TrimSpace(h.adminAPIKey) == "" {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin endpoints disabled"})
-			return
-		}
-
-		provided := strings.TrimSpace(r.Header.Get("X-Retrospec-Admin"))
-		if provided == h.adminAPIKey {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -5,8 +5,6 @@ Local dependencies for RetroSpec development:
 - PostgreSQL (`localhost:5432`)
 - Redis (`localhost:6379`)
 - MinIO S3-compatible object storage (`localhost:9000`)
-- Prometheus (`localhost:9090`)
-- Alertmanager (`localhost:9093`)
 
 ## Start
 
@@ -28,13 +26,6 @@ psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/or
 psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/orchestrator/db/migrations/008_error_markers_evidence.sql
 psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/orchestrator/db/migrations/009_issue_feedback_and_cluster_ops.sql
 ```
-
-## Monitoring Notes
-
-- Prometheus scrapes `http://host.docker.internal:8080/metrics`.
-- Alert rules live in `infra/monitoring/prometheus/alert_rules.yml`.
-- Alertmanager forwards alerts to `http://host.docker.internal:5001/alerts` by default.
-  Update `infra/monitoring/alertmanager/alertmanager.yml` for your on-call destination.
 
 ## Stop
 
