@@ -67,7 +67,12 @@ func NewHandler(
 	artifactTokenTTLSeconds int,
 	sessionRetentionDays int,
 ) *Handler {
-	metrics := newAPIMetrics()
+	var queueStatsProvider queue.StatsProvider
+	if provider, ok := replayProducer.(queue.StatsProvider); ok {
+		queueStatsProvider = provider
+	}
+
+	metrics := newAPIMetrics(queueStatsProvider)
 
 	return &Handler{
 		store:                    store,

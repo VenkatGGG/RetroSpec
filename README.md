@@ -76,6 +76,7 @@ Replay/analyzer workers reclaim stale in-flight jobs with `REPLAY_PROCESSING_STA
 When video rendering fails, the worker still reports `analysis_json` and records a `replay_video` artifact with `failed` status.
 API rate limiting is configurable with `RATE_LIMIT_REQUESTS_PER_SEC` and `RATE_LIMIT_BURST`.
 The orchestrator exposes Prometheus-style counters at `GET /metrics`.
+`/metrics` now also includes queue depth gauges for replay/analyzer stream, pending, retry, and dead-letter backlogs.
 Optional background maintenance loops can be enabled with `AUTO_CLEANUP_INTERVAL_MINUTES` and `AUTO_PROMOTE_INTERVAL_MINUTES`.
 Ingest can auto-promote clusters immediately (`AUTO_PROMOTE_ON_INGEST=true`) so repeated issues appear without waiting for scheduled/manual promotion.
 Set `ALERT_WEBHOOK_URL` to send outbound notifications when clusters are promoted above confidence threshold.

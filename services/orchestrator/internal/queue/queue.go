@@ -21,10 +21,25 @@ type AnalysisJob struct {
 	Site            string   `json:"site"`
 }
 
+type QueueStats struct {
+	ReplayStreamDepth   int64 `json:"replayStreamDepth"`
+	ReplayPending       int64 `json:"replayPending"`
+	ReplayRetryDepth    int64 `json:"replayRetryDepth"`
+	ReplayFailedDepth   int64 `json:"replayFailedDepth"`
+	AnalysisStreamDepth int64 `json:"analysisStreamDepth"`
+	AnalysisPending     int64 `json:"analysisPending"`
+	AnalysisRetryDepth  int64 `json:"analysisRetryDepth"`
+	AnalysisFailedDepth int64 `json:"analysisFailedDepth"`
+}
+
 type Producer interface {
 	EnqueueReplayJob(ctx context.Context, job ReplayJob) error
 	EnqueueAnalysisJob(ctx context.Context, job AnalysisJob) error
 	Close() error
+}
+
+type StatsProvider interface {
+	QueueStats(ctx context.Context) (QueueStats, error)
 }
 
 type NoopProducer struct{}
@@ -43,4 +58,8 @@ func (p *NoopProducer) EnqueueAnalysisJob(_ context.Context, _ AnalysisJob) erro
 
 func (p *NoopProducer) Close() error {
 	return nil
+}
+
+func (p *NoopProducer) QueueStats(_ context.Context) (QueueStats, error) {
+	return QueueStats{}, nil
 }

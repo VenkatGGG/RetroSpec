@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -87,6 +88,32 @@ func (p *RedisProducer) Close() error {
 	return p.client.Close()
 }
 
+func (p *RedisProducer) QueueStats(ctx context.Context) (QueueStats, error) {
+	if err := p.ensureStreamQueues(ctx); err != nil {
+		return QueueStats{}, err
+	}
+
+	replay, err := p.queueStatsFor(ctx, p.replayQueueName)
+	if err != nil {
+		return QueueStats{}, fmt.Errorf("replay queue stats: %w", err)
+	}
+	analysis, err := p.queueStatsFor(ctx, p.analysisQueueName)
+	if err != nil {
+		return QueueStats{}, fmt.Errorf("analysis queue stats: %w", err)
+	}
+
+	return QueueStats{
+		ReplayStreamDepth:   replay.streamDepth,
+		ReplayPending:       replay.pendingDepth,
+		ReplayRetryDepth:    replay.retryDepth,
+		ReplayFailedDepth:   replay.failedDepth,
+		AnalysisStreamDepth: analysis.streamDepth,
+		AnalysisPending:     analysis.pendingDepth,
+		AnalysisRetryDepth:  analysis.retryDepth,
+		AnalysisFailedDepth: analysis.failedDepth,
+	}, nil
+}
+
 func (p *RedisProducer) ensureStreamQueues(ctx context.Context) error {
 	p.ensureMu.Lock()
 	defer p.ensureMu.Unlock()
@@ -154,4 +181,57 @@ func (p *RedisProducer) ensureStreamQueue(ctx context.Context, queueName string)
 	default:
 		return fmt.Errorf("unsupported redis key type=%s", queueType)
 	}
+}
+
+type queueDepth struct {
+	streamDepth  int64
+	pendingDepth int64
+	retryDepth   int64
+	failedDepth  int64
+}
+
+func (p *RedisProducer) queueStatsFor(ctx context.Context, queueName string) (queueDepth, error) {
+	streamDepth, err := p.client.XLen(ctx, queueName).Result()
+	if err != nil && err != redis.Nil {
+		return queueDepth{}, err
+	}
+	if errors.Is(err, redis.Nil) {
+		streamDepth = 0
+	}
+
+	pendingDepth := int64(0)
+	groupName := fmt.Sprintf("%s:group", queueName)
+	pendingResult, pendingErr := p.client.XPending(ctx, queueName, groupName).Result()
+	if pendingErr == nil {
+		pendingDepth = pendingResult.Count
+	} else {
+		details := pendingErr.Error()
+		if details != "NOGROUP No such key '"+queueName+"' or consumer group '"+groupName+"'" &&
+			details != "ERR The XGROUP subcommand requires the key to exist" {
+			return queueDepth{}, pendingErr
+		}
+	}
+
+	retryDepth, err := p.client.ZCard(ctx, queueName+":retry").Result()
+	if err != nil && err != redis.Nil {
+		return queueDepth{}, err
+	}
+	if errors.Is(err, redis.Nil) {
+		retryDepth = 0
+	}
+
+	failedDepth, err := p.client.LLen(ctx, queueName+":failed").Result()
+	if err != nil && err != redis.Nil {
+		return queueDepth{}, err
+	}
+	if errors.Is(err, redis.Nil) {
+		failedDepth = 0
+	}
+
+	return queueDepth{
+		streamDepth:  streamDepth,
+		pendingDepth: pendingDepth,
+		retryDepth:   retryDepth,
+		failedDepth:  failedDepth,
+	}, nil
 }
