@@ -4,6 +4,7 @@ Async worker that consumes `analysis-jobs` from Redis and writes per-session rep
 
 ## Current Behavior
 
+- Consumes analysis jobs from Redis Stream (`analysis-jobs` by default) using a consumer group.
 - Reads rrweb event JSON from S3-compatible storage.
 - Receives marker hint context (label + evidence) from orchestrator jobs and uses it during report generation.
 - Supports provider modes:
@@ -12,7 +13,7 @@ Async worker that consumes `analysis-jobs` from Redis and writes per-session rep
 - `dual_http` responses are validated against a strict schema contract before being merged.
 - Remote model payloads are sampled around marker windows and redacted for common sensitive tokens.
 - Reports `pending -> ready/failed` status via `POST /v1/internal/analysis-reports`.
-- Retries failed jobs with exponential backoff, recovers in-flight jobs from a processing queue, reclaims stale in-flight jobs (`ANALYZER_PROCESSING_STALE_SEC`), and dead-letters exhausted payloads.
+- Retries failed jobs with exponential backoff, reclaims stale pending messages (`ANALYZER_PROCESSING_STALE_SEC`), and dead-letters exhausted payloads.
 
 ## Provider Config
 
@@ -24,7 +25,3 @@ Async worker that consumes `analysis-jobs` from Redis and writes per-session rep
 - `ANALYZER_FALLBACK_TO_HEURISTIC=true|false`
 - `ANALYZER_MIN_ACCEPT_CONFIDENCE` (default 0.6)
 - `ANALYZER_DISCARD_UNCERTAIN=true|false` (marks low-confidence reports as `discarded`)
-
-## Next Step
-
-Move queue consumption to Redis Streams/SQS-style acknowledgements for stronger durability under worker crashes.

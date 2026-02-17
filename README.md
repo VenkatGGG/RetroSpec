@@ -23,7 +23,7 @@ RetroSpec is an async web reliability platform that captures browser session eve
 
 - Session capture is rrweb event-based (not raw live video in-browser).
 - Replay and analysis are asynchronous server workflows.
-- Workers use retry queues plus in-flight recovery (`:processing`) for at-least-once handling in crash scenarios.
+- Workers use Redis Streams consumer groups with stale-claim recovery for at-least-once handling in crash scenarios.
 - Issue promotion is threshold-based (`>=2` similar events by default).
 - Storage split:
   - PostgreSQL for metadata and issue clusters.
