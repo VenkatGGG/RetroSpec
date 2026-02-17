@@ -26,7 +26,7 @@ func main() {
 	}
 	defer db.Close()
 
-	replayQueue, err := queue.NewRedisProducer(cfg.RedisAddr, cfg.ReplayQueueName)
+	replayQueue, err := queue.NewRedisProducer(cfg.RedisAddr, cfg.ReplayQueueName, cfg.AnalysisQueueName)
 	if err != nil {
 		log.Printf("replay queue unavailable (%v), continuing with noop producer", err)
 		replayQueue = nil

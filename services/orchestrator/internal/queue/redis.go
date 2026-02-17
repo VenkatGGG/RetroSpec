@@ -10,11 +10,12 @@ import (
 )
 
 type RedisProducer struct {
-	client    *redis.Client
-	queueName string
+	client            *redis.Client
+	replayQueueName   string
+	analysisQueueName string
 }
 
-func NewRedisProducer(addr, queueName string) (*RedisProducer, error) {
+func NewRedisProducer(addr, replayQueueName, analysisQueueName string) (*RedisProducer, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:         addr,
 		DialTimeout:  5 * time.Second,
@@ -29,7 +30,11 @@ func NewRedisProducer(addr, queueName string) (*RedisProducer, error) {
 		return nil, err
 	}
 
-	return &RedisProducer{client: client, queueName: queueName}, nil
+	return &RedisProducer{
+		client:            client,
+		replayQueueName:   replayQueueName,
+		analysisQueueName: analysisQueueName,
+	}, nil
 }
 
 func (p *RedisProducer) EnqueueReplayJob(ctx context.Context, job ReplayJob) error {
@@ -38,8 +43,20 @@ func (p *RedisProducer) EnqueueReplayJob(ctx context.Context, job ReplayJob) err
 		return err
 	}
 
-	if err := p.client.LPush(ctx, p.queueName, payload).Err(); err != nil {
+	if err := p.client.LPush(ctx, p.replayQueueName, payload).Err(); err != nil {
 		return fmt.Errorf("enqueue replay job: %w", err)
+	}
+	return nil
+}
+
+func (p *RedisProducer) EnqueueAnalysisJob(ctx context.Context, job AnalysisJob) error {
+	payload, err := json.Marshal(job)
+	if err != nil {
+		return err
+	}
+
+	if err := p.client.LPush(ctx, p.analysisQueueName, payload).Err(); err != nil {
+		return fmt.Errorf("enqueue analysis job: %w", err)
 	}
 	return nil
 }

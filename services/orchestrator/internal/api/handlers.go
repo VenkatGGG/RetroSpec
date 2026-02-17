@@ -160,11 +160,20 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 			log.Printf("replay job enqueue failed session=%s err=%v", stored.ID, err)
 		}
 	}
+	analysisQueueError := ""
+	if job, ok := buildAnalysisJob(stored); ok {
+		if err := h.replayProducer.EnqueueAnalysisJob(r.Context(), job); err != nil {
+			analysisQueueError = err.Error()
+			h.metrics.analysisQueueErrorsTotal.Add(1)
+			log.Printf("analysis job enqueue failed session=%s err=%v", stored.ID, err)
+		}
+	}
 	h.metrics.ingestSessionsTotal.Add(1)
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"session":    stored,
-		"queueError": queueError,
+		"session":            stored,
+		"queueError":         queueError,
+		"analysisQueueError": analysisQueueError,
 	})
 }
 
@@ -636,6 +645,30 @@ func buildReplayJob(session store.Session) (queue.ReplayJob, bool) {
 		EventsObjectKey: session.EventsObjectKey,
 		MarkerOffsetsMs: offsets,
 		TriggerKind:     triggerKind,
+	}, true
+}
+
+func buildAnalysisJob(session store.Session) (queue.AnalysisJob, bool) {
+	if session.EventsObjectKey == "" || len(session.Markers) == 0 {
+		return queue.AnalysisJob{}, false
+	}
+
+	offsets := make([]int, 0, len(session.Markers))
+	triggerKind := "ui_no_effect"
+
+	for _, marker := range session.Markers {
+		offsets = append(offsets, marker.ReplayOffsetMs)
+		triggerKind = strongerTrigger(triggerKind, marker.Kind)
+	}
+
+	return queue.AnalysisJob{
+		ProjectID:       session.ProjectID,
+		SessionID:       session.ID,
+		EventsObjectKey: session.EventsObjectKey,
+		MarkerOffsetsMs: offsets,
+		TriggerKind:     triggerKind,
+		Route:           session.Route,
+		Site:            session.Site,
 	}, true
 }
 

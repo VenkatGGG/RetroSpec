@@ -11,7 +11,9 @@ type apiMetrics struct {
 	startedAtUnix               int64
 	ingestSessionsTotal         atomic.Int64
 	replayQueueErrorsTotal      atomic.Int64
+	analysisQueueErrorsTotal    atomic.Int64
 	replayArtifactsTotal        atomic.Int64
+	analysisReportsTotal        atomic.Int64
 	cleanupRunsTotal            atomic.Int64
 	cleanupEventObjectsTotal    atomic.Int64
 	cleanupArtifactObjectsTotal atomic.Int64
@@ -41,9 +43,17 @@ func (m *apiMetrics) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(w, "# TYPE retrospec_replay_queue_errors_total counter\n")
 	_, _ = fmt.Fprintf(w, "retrospec_replay_queue_errors_total %d\n", m.replayQueueErrorsTotal.Load())
 
+	_, _ = fmt.Fprintf(w, "# HELP retrospec_analysis_queue_errors_total Analysis enqueue failures.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE retrospec_analysis_queue_errors_total counter\n")
+	_, _ = fmt.Fprintf(w, "retrospec_analysis_queue_errors_total %d\n", m.analysisQueueErrorsTotal.Load())
+
 	_, _ = fmt.Fprintf(w, "# HELP retrospec_replay_artifacts_total Reported replay artifacts from workers.\n")
 	_, _ = fmt.Fprintf(w, "# TYPE retrospec_replay_artifacts_total counter\n")
 	_, _ = fmt.Fprintf(w, "retrospec_replay_artifacts_total %d\n", m.replayArtifactsTotal.Load())
+
+	_, _ = fmt.Fprintf(w, "# HELP retrospec_analysis_reports_total Reported session analysis cards from workers.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE retrospec_analysis_reports_total counter\n")
+	_, _ = fmt.Fprintf(w, "retrospec_analysis_reports_total %d\n", m.analysisReportsTotal.Load())
 
 	_, _ = fmt.Fprintf(w, "# HELP retrospec_cleanup_runs_total Cleanup runs executed.\n")
 	_, _ = fmt.Fprintf(w, "# TYPE retrospec_cleanup_runs_total counter\n")
