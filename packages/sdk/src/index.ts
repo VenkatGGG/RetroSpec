@@ -458,10 +458,14 @@ function instrumentValidationFailures(state: InternalState): () => void {
 
     const signature = elementSignature(event.target);
     const fieldName = detectFieldName(event.target);
+    const reason = detectValidationReason(event.target);
+    const reasonToken = normalizeToken(reason || "validation");
     pushMarker(state, {
       kind: "validation_failed",
-      label: `Validation blocked submission: ${fieldName}`,
-      clusterHint: `invalid:${normalizeToken(signature)}:${normalizePath(window.location.pathname)}`,
+      label: reason
+        ? `Validation blocked submission: ${fieldName} (${reason})`
+        : `Validation blocked submission: ${fieldName}`,
+      clusterHint: `invalid:${normalizeToken(signature)}:${reasonToken}:${normalizePath(window.location.pathname)}`,
     });
   };
 
@@ -514,6 +518,18 @@ function detectFieldName(element: Element): string {
   }
 
   return element.tagName.toLowerCase();
+}
+
+function detectValidationReason(element: Element): string {
+  if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    return (element.validationMessage || "").trim().slice(0, 120);
+  }
+
+  return "";
 }
 
 function elementSignature(element: Element): string {
