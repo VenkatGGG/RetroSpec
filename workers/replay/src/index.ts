@@ -120,12 +120,10 @@ async function drainRetryQueue(): Promise<void> {
     return;
   }
 
-  const pipeline = redis.multi();
   for (const item of due) {
-    pipeline.zrem(retryQueueName, item);
-    pipeline.xadd(queueName, "*", "payload", item);
+    await redis.xadd(queueName, "*", "payload", item);
+    await redis.zrem(retryQueueName, item);
   }
-  await pipeline.exec();
 }
 
 async function enqueueRetry(payload: unknown, attempt: number): Promise<void> {
