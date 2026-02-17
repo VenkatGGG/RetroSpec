@@ -351,6 +351,18 @@ async function workerLoop() {
     } catch (error) {
       const details = error instanceof Error ? error.message : String(error);
       console.error(`[analyzer-worker] loop failed err=${details}`);
+      if (details.includes("NOGROUP")) {
+        try {
+          await ensureConsumerGroup();
+          console.warn(
+            `[analyzer-worker] recreated missing consumer group stream=${queueName} group=${groupName}`,
+          );
+        } catch (recoveryError) {
+          const recoveryDetails =
+            recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+          console.error(`[analyzer-worker] consumer group recovery failed err=${recoveryDetails}`);
+        }
+      }
       await sleep(1_000);
     }
   }
