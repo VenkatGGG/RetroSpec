@@ -151,6 +151,44 @@
   font-weight: 600;
 }
 
+.triage-controls {
+  border-top: 1px solid #22304d;
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.75rem 0;
+  padding-top: 0.75rem;
+}
+
+.triage-controls label {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.triage-controls select,
+.triage-controls input {
+  background: #16263f;
+  border: 1px solid #38507b;
+  border-radius: 8px;
+  color: #e3e8f2;
+  padding: 0.45rem 0.55rem;
+}
+
+.triage-controls button {
+  background: #1e3a8a;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  color: #eff6ff;
+  cursor: pointer;
+  font-weight: 600;
+  margin-top: 0.25rem;
+  padding: 0.5rem 0.7rem;
+}
+
+.triage-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 .session-heading {
   align-items: flex-start;
   display: flex;

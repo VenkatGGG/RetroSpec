@@ -105,6 +105,38 @@ export const reportingApi = createApi({
       }),
       invalidatesTags: [{ type: "Issue", id: "LIST" }],
     }),
+    updateIssueState: builder.mutation<
+      {
+        state: {
+          projectId: string;
+          clusterKey: string;
+          state: "open" | "acknowledged" | "resolved" | "muted";
+          assignee: string;
+          mutedUntil: string | null;
+          note: string;
+          createdAt: string;
+          updatedAt: string;
+        };
+      },
+      {
+        clusterKey: string;
+        state: "open" | "acknowledged" | "resolved" | "muted";
+        assignee?: string;
+        mutedUntil?: string;
+        note?: string;
+      }
+    >({
+      query: ({ clusterKey, ...body }) => ({
+        url: `/v1/issues/${encodeURIComponent(clusterKey)}/state`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (_result, _error, args) => [
+        { type: "Issue", id: "LIST" },
+        { type: "Issue", id: args.clusterKey },
+        { type: "Issue", id: `${args.clusterKey}:sessions` },
+      ],
+    }),
     cleanupData: builder.mutation<
       {
         deletedSessions: number;
@@ -195,6 +227,7 @@ export const {
   useGetSessionEventsQuery,
   useGetSessionArtifactTokenQuery,
   usePromoteIssuesMutation,
+  useUpdateIssueStateMutation,
   useCleanupDataMutation,
   useCreateProjectMutation,
   useCreateProjectKeyMutation,

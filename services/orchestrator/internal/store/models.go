@@ -27,15 +27,20 @@ type ErrorMark struct {
 }
 
 type IssueCluster struct {
-	ProjectID               string    `json:"projectId"`
-	Key                     string    `json:"key"`
-	Symptom                 string    `json:"symptom"`
-	SessionCount            int       `json:"sessionCount"`
-	UserCount               int       `json:"userCount"`
-	RepresentativeSessionID string    `json:"representativeSessionId"`
-	Confidence              float64   `json:"confidence"`
-	LastSeenAt              time.Time `json:"lastSeenAt"`
-	CreatedAt               time.Time `json:"createdAt"`
+	ProjectID               string     `json:"projectId"`
+	Key                     string     `json:"key"`
+	Symptom                 string     `json:"symptom"`
+	SessionCount            int        `json:"sessionCount"`
+	UserCount               int        `json:"userCount"`
+	RepresentativeSessionID string     `json:"representativeSessionId"`
+	Confidence              float64    `json:"confidence"`
+	LastSeenAt              time.Time  `json:"lastSeenAt"`
+	CreatedAt               time.Time  `json:"createdAt"`
+	State                   string     `json:"state"`
+	Assignee                string     `json:"assignee"`
+	MutedUntil              *time.Time `json:"mutedUntil,omitempty"`
+	StateNote               string     `json:"stateNote"`
+	StateUpdatedAt          *time.Time `json:"stateUpdatedAt,omitempty"`
 }
 
 type IssueClusterSession struct {
@@ -50,6 +55,17 @@ type IssueClusterSession struct {
 	ReportStatus     string    `json:"reportStatus"`
 	ReportConfidence float64   `json:"reportConfidence"`
 	ReportSymptom    string    `json:"reportSymptom"`
+}
+
+type IssueClusterState struct {
+	ProjectID  string     `json:"projectId"`
+	ClusterKey string     `json:"clusterKey"`
+	State      string     `json:"state"`
+	Assignee   string     `json:"assignee"`
+	MutedUntil *time.Time `json:"mutedUntil,omitempty"`
+	Note       string     `json:"note"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
 }
 
 type IssueKindStat struct {

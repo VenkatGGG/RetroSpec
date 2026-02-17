@@ -1,11 +1,49 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   useCleanupDataMutation,
   useGetIssuesQuery,
   useGetIssueStatsQuery,
   usePromoteIssuesMutation,
+  useUpdateIssueStateMutation,
 } from "../features/reporting/reportingApi";
+import type { IssueCluster } from "../features/sessions/types";
+
+interface TriageDraft {
+  state: "open" | "acknowledged" | "resolved" | "muted";
+  assignee: string;
+  note: string;
+  mutedUntil: string;
+}
+
+function toDatetimeLocalValue(value?: string | null): string {
+  if (!value) {
+    return "";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function createDraft(cluster: IssueCluster): TriageDraft {
+  const normalizedState =
+    cluster.state === "open" ||
+    cluster.state === "acknowledged" ||
+    cluster.state === "resolved" ||
+    cluster.state === "muted"
+      ? cluster.state
+      : "open";
+
+  return {
+    state: normalizedState,
+    assignee: cluster.assignee ?? "",
+    note: cluster.stateNote ?? "",
+    mutedUntil: toDatetimeLocalValue(cluster.mutedUntil),
+  };
+}
 
 export function IssueClustersPage() {
   const [lookbackHours, setLookbackHours] = useState(24);
@@ -17,8 +55,27 @@ export function IssueClustersPage() {
   } = useGetIssuesQuery();
   const { data: issueStats } = useGetIssueStatsQuery(lookbackHours);
   const [promoteIssues, { isLoading: isPromoting }] = usePromoteIssuesMutation();
+  const [updateIssueState] = useUpdateIssueStateMutation();
   const [cleanupData, { isLoading: isCleaning }] = useCleanupDataMutation();
   const [maintenanceMessage, setMaintenanceMessage] = useState<string>("");
+  const [triageDrafts, setTriageDrafts] = useState<Record<string, TriageDraft>>({});
+  const [savingIssueKey, setSavingIssueKey] = useState<string | null>(null);
+  const [triageMessage, setTriageMessage] = useState<string>("");
+
+  useEffect(() => {
+    if (clusters.length === 0) {
+      return;
+    }
+    setTriageDrafts((previous) => {
+      const next = { ...previous };
+      for (const cluster of clusters) {
+        if (!next[cluster.key]) {
+          next[cluster.key] = createDraft(cluster);
+        }
+      }
+      return next;
+    });
+  }, [clusters]);
 
   const handlePromote = async () => {
     await promoteIssues();
@@ -30,6 +87,49 @@ export function IssueClustersPage() {
     setMaintenanceMessage(
       `Cleanup: ${result.deletedSessions} sessions, ${result.deletedIssueClusters} clusters, ${result.deletedEventObjects} event objects, ${result.deletedArtifactObjects} replay artifacts.`,
     );
+  };
+
+  const handleDraftChange = (clusterKey: string, patch: Partial<TriageDraft>) => {
+    setTriageDrafts((previous) => ({
+      ...previous,
+      [clusterKey]: {
+        ...(previous[clusterKey] ?? {
+          state: "open",
+          assignee: "",
+          note: "",
+          mutedUntil: "",
+        }),
+        ...patch,
+      },
+    }));
+  };
+
+  const handleSaveTriage = async (clusterKey: string) => {
+    const draft = triageDrafts[clusterKey];
+    if (!draft) {
+      return;
+    }
+
+    setSavingIssueKey(clusterKey);
+    try {
+      const mutedUntilISO =
+        draft.state === "muted" && draft.mutedUntil
+          ? new Date(draft.mutedUntil).toISOString()
+          : undefined;
+
+      await updateIssueState({
+        clusterKey,
+        state: draft.state,
+        assignee: draft.assignee.trim(),
+        note: draft.note.trim(),
+        mutedUntil: mutedUntilISO,
+      }).unwrap();
+      setTriageMessage(`Saved triage updates for ${clusterKey}.`);
+    } catch {
+      setTriageMessage(`Failed to save triage updates for ${clusterKey}.`);
+    } finally {
+      setSavingIssueKey(null);
+    }
   };
 
   return (
@@ -62,6 +162,7 @@ export function IssueClustersPage() {
         {isFetching && <span>Refreshing...</span>}
       </div>
       {maintenanceMessage && <p>{maintenanceMessage}</p>}
+      {triageMessage && <p>{triageMessage}</p>}
       {issueStats && issueStats.stats.length > 0 && (
         <section className="stats-grid">
           {issueStats.stats.map((stat) => (
@@ -106,6 +207,79 @@ export function IssueClustersPage() {
             <p>
               <strong>Confidence:</strong> {cluster.confidence.toFixed(2)}
             </p>
+            <p>
+              <strong>Triage:</strong> {cluster.state} | <strong>Assignee:</strong>{" "}
+              {cluster.assignee || "unassigned"}
+            </p>
+            <div className="triage-controls">
+              <label htmlFor={`triage-state-${cluster.key}`}>State</label>
+              <select
+                id={`triage-state-${cluster.key}`}
+                value={triageDrafts[cluster.key]?.state ?? createDraft(cluster).state}
+                onChange={(event) =>
+                  handleDraftChange(cluster.key, {
+                    state: event.target.value as TriageDraft["state"],
+                  })
+                }
+              >
+                <option value="open">open</option>
+                <option value="acknowledged">acknowledged</option>
+                <option value="resolved">resolved</option>
+                <option value="muted">muted</option>
+              </select>
+              <label htmlFor={`triage-assignee-${cluster.key}`}>Assignee</label>
+              <input
+                id={`triage-assignee-${cluster.key}`}
+                value={triageDrafts[cluster.key]?.assignee ?? createDraft(cluster).assignee}
+                onChange={(event) =>
+                  handleDraftChange(cluster.key, {
+                    assignee: event.target.value,
+                  })
+                }
+                placeholder="oncall-web"
+              />
+              {((triageDrafts[cluster.key]?.state ?? createDraft(cluster).state) === "muted") && (
+                <>
+                  <label htmlFor={`triage-muted-until-${cluster.key}`}>Muted Until</label>
+                  <input
+                    id={`triage-muted-until-${cluster.key}`}
+                    type="datetime-local"
+                    value={
+                      triageDrafts[cluster.key]?.mutedUntil ?? createDraft(cluster).mutedUntil
+                    }
+                    onChange={(event) =>
+                      handleDraftChange(cluster.key, {
+                        mutedUntil: event.target.value,
+                      })
+                    }
+                  />
+                </>
+              )}
+              <label htmlFor={`triage-note-${cluster.key}`}>Note</label>
+              <input
+                id={`triage-note-${cluster.key}`}
+                value={triageDrafts[cluster.key]?.note ?? createDraft(cluster).note}
+                onChange={(event) =>
+                  handleDraftChange(cluster.key, {
+                    note: event.target.value,
+                  })
+                }
+                placeholder="Investigating checkout flow"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSaveTriage(cluster.key);
+                }}
+                disabled={
+                  savingIssueKey === cluster.key ||
+                  ((triageDrafts[cluster.key]?.state ?? createDraft(cluster).state) === "muted" &&
+                    !(triageDrafts[cluster.key]?.mutedUntil ?? createDraft(cluster).mutedUntil))
+                }
+              >
+                {savingIssueKey === cluster.key ? "Saving..." : "Save triage"}
+              </button>
+            </div>
             <p>
               <Link to={`/issues/${encodeURIComponent(cluster.key)}/sessions`}>
                 View cluster sessions

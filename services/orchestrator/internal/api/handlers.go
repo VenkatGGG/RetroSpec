@@ -122,6 +122,7 @@ func (h *Handler) Router() http.Handler {
 			r.With(h.requireWriteAccess).Post("/artifacts/session-events", h.uploadSessionEvents)
 			r.With(h.requireWriteAccess).Post("/ingest/session", h.ingestSession)
 			r.With(h.requireWriteAccess).Post("/issues/promote", h.promoteIssues)
+			r.With(h.requireWriteAccess).Post("/issues/{clusterKey}/state", h.updateIssueState)
 			r.Get("/issues/stats", h.listIssueStats)
 			r.Get("/issues", h.listIssues)
 			r.Get("/issues/{clusterKey}/sessions", h.listIssueSessions)
@@ -292,6 +293,13 @@ type reportAnalysisResultRequest struct {
 	VisualSummary      string  `json:"visualSummary"`
 	Confidence         float64 `json:"confidence"`
 	GeneratedAt        string  `json:"generatedAt"`
+}
+
+type updateIssueStateRequest struct {
+	State      string `json:"state"`
+	Assignee   string `json:"assignee"`
+	MutedUntil string `json:"mutedUntil"`
+	Note       string `json:"note"`
 }
 
 func (h *Handler) listProjectAPIKeys(w http.ResponseWriter, r *http.Request) {
@@ -504,6 +512,72 @@ func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"issues": clusters})
+}
+
+func (h *Handler) updateIssueState(w http.ResponseWriter, r *http.Request) {
+	clusterKey := strings.TrimSpace(chi.URLParam(r, "clusterKey"))
+	if clusterKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "clusterKey is required"})
+		return
+	}
+
+	payload := updateIssueStateRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	state := strings.TrimSpace(payload.State)
+	if state == "" {
+		state = "open"
+	}
+	if state != "open" && state != "acknowledged" && state != "resolved" && state != "muted" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "state must be one of: open, acknowledged, resolved, muted"})
+		return
+	}
+
+	var mutedUntil *time.Time
+	if candidate := strings.TrimSpace(payload.MutedUntil); candidate != "" {
+		parsed, err := time.Parse(time.RFC3339, candidate)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mutedUntil must be RFC3339 timestamp"})
+			return
+		}
+		mutedUntil = &parsed
+	}
+	if state == "muted" && mutedUntil == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mutedUntil is required when state=muted"})
+		return
+	}
+
+	projectID := h.projectIDFromContext(r.Context())
+	exists, err := h.store.IssueClusterExists(r.Context(), projectID, clusterKey)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "issue lookup failed"})
+		return
+	}
+	if !exists {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "issue cluster not found"})
+		return
+	}
+
+	updated, err := h.store.UpsertIssueClusterState(
+		r.Context(),
+		projectID,
+		clusterKey,
+		state,
+		payload.Assignee,
+		mutedUntil,
+		payload.Note,
+	)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "issue state update failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"state": updated,
+	})
 }
 
 func (h *Handler) listIssueSessions(w http.ResponseWriter, r *http.Request) {

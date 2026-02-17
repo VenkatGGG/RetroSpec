@@ -68,6 +68,11 @@ export interface IssueCluster {
   confidence: number;
   lastSeenAt: string;
   representativeSessionId: string;
+  state: "open" | "acknowledged" | "resolved" | "muted" | string;
+  assignee: string;
+  mutedUntil?: string | null;
+  stateNote: string;
+  stateUpdatedAt?: string | null;
 }
 
 export interface IssueKindStat {

@@ -267,10 +267,27 @@ func (p *Postgres) ListIssueClusters(ctx context.Context, projectID string) ([]I
 
 	rows, err := p.pool.Query(
 		ctx,
-		`SELECT project_id, key, symptom, session_count, user_count, representative_session_id, confidence, last_seen_at, created_at
-		 FROM issue_clusters
-		 WHERE project_id = $1
-		 ORDER BY last_seen_at DESC`,
+		`SELECT
+		   ic.project_id,
+		   ic.key,
+		   ic.symptom,
+		   ic.session_count,
+		   ic.user_count,
+		   ic.representative_session_id,
+		   ic.confidence,
+		   ic.last_seen_at,
+		   ic.created_at,
+		   COALESCE(ics.state, 'open') AS state,
+		   COALESCE(ics.assignee, '') AS assignee,
+		   ics.muted_until,
+		   COALESCE(ics.note, '') AS state_note,
+		   ics.updated_at AS state_updated_at
+		 FROM issue_clusters ic
+		 LEFT JOIN issue_cluster_states ics
+		   ON ics.project_id = ic.project_id
+		  AND ics.cluster_key = ic.key
+		 WHERE ic.project_id = $1
+		 ORDER BY ic.last_seen_at DESC`,
 		projectID,
 	)
 	if err != nil {
@@ -291,6 +308,11 @@ func (p *Postgres) ListIssueClusters(ctx context.Context, projectID string) ([]I
 			&cluster.Confidence,
 			&cluster.LastSeenAt,
 			&cluster.CreatedAt,
+			&cluster.State,
+			&cluster.Assignee,
+			&cluster.MutedUntil,
+			&cluster.StateNote,
+			&cluster.StateUpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -302,6 +324,96 @@ func (p *Postgres) ListIssueClusters(ctx context.Context, projectID string) ([]I
 	}
 
 	return clusters, nil
+}
+
+func (p *Postgres) UpsertIssueClusterState(
+	ctx context.Context,
+	projectID string,
+	clusterKey string,
+	state string,
+	assignee string,
+	mutedUntil *time.Time,
+	note string,
+) (IssueClusterState, error) {
+	projectID = normalizeProjectID(projectID)
+	clusterKey = strings.TrimSpace(clusterKey)
+	if clusterKey == "" {
+		return IssueClusterState{}, fmt.Errorf("clusterKey is required")
+	}
+
+	state = normalizeIssueState(state)
+	assignee = strings.TrimSpace(assignee)
+	note = strings.TrimSpace(note)
+
+	if state != "muted" {
+		mutedUntil = nil
+	}
+
+	stored := IssueClusterState{}
+	err := p.pool.QueryRow(
+		ctx,
+		`INSERT INTO issue_cluster_states (
+		   project_id, cluster_key, state, assignee, muted_until, note
+		 )
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 ON CONFLICT (project_id, cluster_key) DO UPDATE
+		 SET state = EXCLUDED.state,
+		     assignee = EXCLUDED.assignee,
+		     muted_until = EXCLUDED.muted_until,
+		     note = EXCLUDED.note,
+		     updated_at = NOW()
+		 RETURNING project_id, cluster_key, state, assignee, muted_until, note, created_at, updated_at`,
+		projectID,
+		clusterKey,
+		state,
+		assignee,
+		mutedUntil,
+		note,
+	).Scan(
+		&stored.ProjectID,
+		&stored.ClusterKey,
+		&stored.State,
+		&stored.Assignee,
+		&stored.MutedUntil,
+		&stored.Note,
+		&stored.CreatedAt,
+		&stored.UpdatedAt,
+	)
+	if err != nil {
+		return IssueClusterState{}, err
+	}
+
+	return stored, nil
+}
+
+func (p *Postgres) IssueClusterExists(
+	ctx context.Context,
+	projectID string,
+	clusterKey string,
+) (bool, error) {
+	projectID = normalizeProjectID(projectID)
+	clusterKey = strings.TrimSpace(clusterKey)
+	if clusterKey == "" {
+		return false, nil
+	}
+
+	exists := false
+	err := p.pool.QueryRow(
+		ctx,
+		`SELECT EXISTS (
+		   SELECT 1
+		   FROM issue_clusters
+		   WHERE project_id = $1
+		     AND key = $2
+		 )`,
+		projectID,
+		clusterKey,
+	).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+
+	return exists, nil
 }
 
 func (p *Postgres) ListIssueClusterSessions(
@@ -1062,6 +1174,15 @@ func normalizeReportStatusFilter(status string) string {
 		return strings.TrimSpace(status)
 	default:
 		return ""
+	}
+}
+
+func normalizeIssueState(state string) string {
+	switch strings.TrimSpace(state) {
+	case "open", "acknowledged", "resolved", "muted":
+		return strings.TrimSpace(state)
+	default:
+		return "open"
 	}
 }
 
