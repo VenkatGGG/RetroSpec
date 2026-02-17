@@ -10,6 +10,23 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const ingestApiKey = import.meta.env.VITE_INGEST_API_KEY;
 const adminApiKey = import.meta.env.VITE_ADMIN_API_KEY;
 
+export interface QueueHealthSnapshot {
+  status: "healthy" | "warning" | "critical";
+  generatedAt: string;
+  replay: {
+    streamDepth: number;
+    pending: number;
+    retryDepth: number;
+    failedDepth: number;
+  };
+  analysis: {
+    streamDepth: number;
+    pending: number;
+    retryDepth: number;
+    failedDepth: number;
+  };
+}
+
 export const reportingApi = createApi({
   reducerPath: "reportingApi",
   baseQuery: fetchBaseQuery({
@@ -219,6 +236,10 @@ export const reportingApi = createApi({
         }>;
       }) => response.keys,
     }),
+    getQueueHealth: builder.query<QueueHealthSnapshot, void>({
+      query: () => "/v1/admin/queue-health",
+      transformResponse: (response: QueueHealthSnapshot) => response,
+    }),
   }),
 });
 
@@ -234,6 +255,7 @@ export const {
   useCleanupDataMutation,
   useCreateProjectMutation,
   useCreateProjectKeyMutation,
+  useGetQueueHealthQuery,
   useListProjectsQuery,
   useListProjectKeysQuery,
 } = reportingApi;

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   useCreateProjectKeyMutation,
   useCreateProjectMutation,
+  useGetQueueHealthQuery,
   useListProjectKeysQuery,
   useListProjectsQuery,
 } from "../features/reporting/reportingApi";
@@ -17,6 +18,13 @@ export function AdminPage() {
 
   const { data: projects = [], isLoading: isProjectsLoading } = useListProjectsQuery();
   const { data: projectKeys = [] } = useListProjectKeysQuery(projectId, { skip: !projectId });
+  const {
+    data: queueHealth,
+    isLoading: isQueueHealthLoading,
+    isFetching: isQueueHealthFetching,
+    isError: isQueueHealthError,
+    refetch: refetchQueueHealth,
+  } = useGetQueueHealthQuery(undefined, { pollingInterval: 15000 });
   const [createProject, { isLoading: isCreatingProject }] = useCreateProjectMutation();
   const [createProjectKey, { isLoading: isCreatingKey }] = useCreateProjectKeyMutation();
 
@@ -52,6 +60,46 @@ export function AdminPage() {
         <Link to="/">Back to issues</Link>
       </div>
       <p>Create projects and issue project-specific API keys for SDK integrations.</p>
+      <div className="admin-card queue-health-card">
+        <div className="artifact-card-header">
+          <h2>Queue Health</h2>
+          <button
+            type="button"
+            onClick={() => void refetchQueueHealth()}
+            disabled={isQueueHealthFetching}
+          >
+            {isQueueHealthFetching ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+        {isQueueHealthLoading && <p>Loading queue health...</p>}
+        {isQueueHealthError && <p>Queue health unavailable. Verify admin auth and Redis connection.</p>}
+        {queueHealth && (
+          <>
+            <p>
+              <strong>Status:</strong> <span className={`queue-status-${queueHealth.status}`}>{queueHealth.status}</span>
+            </p>
+            <p>
+              <strong>Generated:</strong> {new Date(queueHealth.generatedAt).toLocaleString()}
+            </p>
+            <div className="queue-health-grid">
+              <div className="stats-card">
+                <h3>Replay Queue</h3>
+                <p>Stream: {queueHealth.replay.streamDepth}</p>
+                <p>Pending: {queueHealth.replay.pending}</p>
+                <p>Retry: {queueHealth.replay.retryDepth}</p>
+                <p>Dead-letter: {queueHealth.replay.failedDepth}</p>
+              </div>
+              <div className="stats-card">
+                <h3>Analysis Queue</h3>
+                <p>Stream: {queueHealth.analysis.streamDepth}</p>
+                <p>Pending: {queueHealth.analysis.pending}</p>
+                <p>Retry: {queueHealth.analysis.retryDepth}</p>
+                <p>Dead-letter: {queueHealth.analysis.failedDepth}</p>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
       {isProjectsLoading && <p>Loading projects...</p>}
 
       <div className="admin-grid">

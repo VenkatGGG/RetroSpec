@@ -127,6 +127,31 @@
   opacity: 0.7;
 }
 
+.queue-health-card {
+  margin-top: 1rem;
+}
+
+.queue-health-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.queue-status-healthy {
+  color: #86efac;
+  text-transform: uppercase;
+}
+
+.queue-status-warning {
+  color: #fcd34d;
+  text-transform: uppercase;
+}
+
+.queue-status-critical {
+  color: #fca5a5;
+  text-transform: uppercase;
+}
+
 .admin-result {
   color: #8ec5ff;
   font-weight: 600;
