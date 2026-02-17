@@ -522,9 +522,30 @@ func (h *Handler) listIssueSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
+	reportStatus := strings.TrimSpace(r.URL.Query().Get("reportStatus"))
+	if reportStatus != "" && reportStatus != "pending" && reportStatus != "ready" && reportStatus != "failed" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reportStatus must be one of: pending, ready, failed"})
+		return
+	}
+	minConfidence := 0.0
+	if candidate := strings.TrimSpace(r.URL.Query().Get("minConfidence")); candidate != "" {
+		parsed, err := strconv.ParseFloat(candidate, 64)
+		if err != nil || parsed < 0 || parsed > 1 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "minConfidence must be a number between 0 and 1"})
+			return
+		}
+		minConfidence = parsed
+	}
 
 	projectID := h.projectIDFromContext(r.Context())
-	sessions, err := h.store.ListIssueClusterSessions(r.Context(), projectID, clusterKey, limit)
+	sessions, err := h.store.ListIssueClusterSessions(
+		r.Context(),
+		projectID,
+		clusterKey,
+		reportStatus,
+		minConfidence,
+		limit,
+	)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cluster sessions lookup failed"})
 		return
@@ -533,7 +554,11 @@ func (h *Handler) listIssueSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"clusterKey": clusterKey,
 		"limit":      limit,
-		"sessions":   sessions,
+		"filters": map[string]any{
+			"reportStatus":  reportStatus,
+			"minConfidence": minConfidence,
+		},
+		"sessions": sessions,
 	})
 }
 

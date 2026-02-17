@@ -44,16 +44,34 @@ export const reportingApi = createApi({
       providesTags: [{ type: "Issue", id: "STATS" }],
     }),
     getIssueSessions: builder.query<
-      { clusterKey: string; limit: number; sessions: IssueClusterSession[] },
-      { clusterKey: string; limit?: number }
+      {
+        clusterKey: string;
+        limit: number;
+        filters?: { reportStatus: string; minConfidence: number };
+        sessions: IssueClusterSession[];
+      },
+      { clusterKey: string; limit?: number; reportStatus?: string; minConfidence?: number }
     >({
-      query: ({ clusterKey, limit }) =>
-        typeof limit === "number"
-          ? `/v1/issues/${encodeURIComponent(clusterKey)}/sessions?limit=${limit}`
-          : `/v1/issues/${encodeURIComponent(clusterKey)}/sessions`,
+      query: ({ clusterKey, limit, reportStatus, minConfidence }) => {
+        const query = new URLSearchParams();
+        if (typeof limit === "number") {
+          query.set("limit", String(limit));
+        }
+        if (typeof reportStatus === "string" && reportStatus.trim() !== "") {
+          query.set("reportStatus", reportStatus.trim());
+        }
+        if (typeof minConfidence === "number" && Number.isFinite(minConfidence)) {
+          query.set("minConfidence", String(minConfidence));
+        }
+        const queryString = query.toString();
+        return queryString.length > 0
+          ? `/v1/issues/${encodeURIComponent(clusterKey)}/sessions?${queryString}`
+          : `/v1/issues/${encodeURIComponent(clusterKey)}/sessions`;
+      },
       transformResponse: (response: {
         clusterKey: string;
         limit: number;
+        filters?: { reportStatus: string; minConfidence: number };
         sessions: IssueClusterSession[];
       }) => response,
       providesTags: (_result, _error, args) => [{ type: "Issue", id: `${args.clusterKey}:sessions` }],

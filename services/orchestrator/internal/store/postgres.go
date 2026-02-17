@@ -308,12 +308,21 @@ func (p *Postgres) ListIssueClusterSessions(
 	ctx context.Context,
 	projectID string,
 	clusterKey string,
+	reportStatus string,
+	minConfidence float64,
 	limit int,
 ) ([]IssueClusterSession, error) {
 	projectID = normalizeProjectID(projectID)
 	clusterKey = strings.TrimSpace(clusterKey)
 	if clusterKey == "" {
 		return []IssueClusterSession{}, nil
+	}
+	reportStatus = normalizeReportStatusFilter(reportStatus)
+	if minConfidence < 0 {
+		minConfidence = 0
+	}
+	if minConfidence > 1 {
+		minConfidence = 1
 	}
 	if limit < 1 {
 		limit = 20
@@ -343,6 +352,8 @@ func (p *Postgres) ListIssueClusterSessions(
 		  AND src.session_id = s.id
 		 WHERE s.project_id = $1
 		   AND em.cluster_key = $2
+		   AND ($3::text = '' OR COALESCE(src.status, 'pending') = $3::text)
+		   AND COALESCE(src.confidence, 0) >= $4
 		 GROUP BY
 		   s.id,
 		   s.project_id,
@@ -354,9 +365,11 @@ func (p *Postgres) ListIssueClusterSessions(
 		   src.confidence,
 		   src.symptom
 		 ORDER BY MAX(em.observed_at) DESC
-		 LIMIT $3`,
+		 LIMIT $5`,
 		projectID,
 		clusterKey,
+		reportStatus,
+		minConfidence,
 		limit,
 	)
 	if err != nil {
@@ -1040,6 +1053,15 @@ func normalizeReportStatus(status string) string {
 		return strings.TrimSpace(status)
 	default:
 		return "pending"
+	}
+}
+
+func normalizeReportStatusFilter(status string) string {
+	switch strings.TrimSpace(status) {
+	case "", "pending", "ready", "failed":
+		return strings.TrimSpace(status)
+	default:
+		return ""
 	}
 }
 
