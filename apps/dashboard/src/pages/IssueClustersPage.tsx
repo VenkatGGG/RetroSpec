@@ -106,6 +106,11 @@ export function IssueClustersPage() {
             <p>
               <strong>Confidence:</strong> {cluster.confidence.toFixed(2)}
             </p>
+            <p>
+              <Link to={`/issues/${encodeURIComponent(cluster.key)}/sessions`}>
+                View cluster sessions
+              </Link>
+            </p>
             <Link to={`/sessions/${cluster.representativeSessionId}`}>Open representative replay</Link>
           </article>
         ))}

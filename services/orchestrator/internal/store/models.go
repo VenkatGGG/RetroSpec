@@ -38,6 +38,20 @@ type IssueCluster struct {
 	CreatedAt               time.Time `json:"createdAt"`
 }
 
+type IssueClusterSession struct {
+	SessionID        string    `json:"sessionId"`
+	ProjectID        string    `json:"projectId"`
+	Site             string    `json:"site"`
+	Route            string    `json:"route"`
+	StartedAt        time.Time `json:"startedAt"`
+	DurationMs       int       `json:"durationMs"`
+	LastObservedAt   time.Time `json:"lastObservedAt"`
+	MarkerCount      int       `json:"markerCount"`
+	ReportStatus     string    `json:"reportStatus"`
+	ReportConfidence float64   `json:"reportConfidence"`
+	ReportSymptom    string    `json:"reportSymptom"`
+}
+
 type IssueKindStat struct {
 	Kind         string    `json:"kind"`
 	MarkerCount  int       `json:"markerCount"`

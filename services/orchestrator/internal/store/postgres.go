@@ -304,6 +304,93 @@ func (p *Postgres) ListIssueClusters(ctx context.Context, projectID string) ([]I
 	return clusters, nil
 }
 
+func (p *Postgres) ListIssueClusterSessions(
+	ctx context.Context,
+	projectID string,
+	clusterKey string,
+	limit int,
+) ([]IssueClusterSession, error) {
+	projectID = normalizeProjectID(projectID)
+	clusterKey = strings.TrimSpace(clusterKey)
+	if clusterKey == "" {
+		return []IssueClusterSession{}, nil
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	rows, err := p.pool.Query(
+		ctx,
+		`SELECT
+		   s.id,
+		   s.project_id,
+		   s.site,
+		   s.route,
+		   s.started_at,
+		   s.duration_ms,
+		   MAX(em.observed_at) AS last_observed_at,
+		   COUNT(*)::int AS marker_count,
+		   COALESCE(src.status, 'pending') AS report_status,
+		   COALESCE(src.confidence, 0) AS report_confidence,
+		   COALESCE(src.symptom, '') AS report_symptom
+		 FROM error_markers em
+		 JOIN sessions s ON s.id = em.session_id
+		 LEFT JOIN session_report_cards src
+		   ON src.project_id = s.project_id
+		  AND src.session_id = s.id
+		 WHERE s.project_id = $1
+		   AND em.cluster_key = $2
+		 GROUP BY
+		   s.id,
+		   s.project_id,
+		   s.site,
+		   s.route,
+		   s.started_at,
+		   s.duration_ms,
+		   src.status,
+		   src.confidence,
+		   src.symptom
+		 ORDER BY MAX(em.observed_at) DESC
+		 LIMIT $3`,
+		projectID,
+		clusterKey,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	sessions := make([]IssueClusterSession, 0)
+	for rows.Next() {
+		var session IssueClusterSession
+		if err := rows.Scan(
+			&session.SessionID,
+			&session.ProjectID,
+			&session.Site,
+			&session.Route,
+			&session.StartedAt,
+			&session.DurationMs,
+			&session.LastObservedAt,
+			&session.MarkerCount,
+			&session.ReportStatus,
+			&session.ReportConfidence,
+			&session.ReportSymptom,
+		); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	if rows.Err() != nil {
+		return nil, rows.Err()
+	}
+
+	return sessions, nil
+}
+
 func (p *Postgres) ListIssueKindStats(ctx context.Context, projectID string, lookback time.Duration) ([]IssueKindStat, error) {
 	projectID = normalizeProjectID(projectID)
 	if lookback <= 0 {

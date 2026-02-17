@@ -78,6 +78,20 @@ export interface IssueKindStat {
   lastSeenAt: string;
 }
 
+export interface IssueClusterSession {
+  sessionId: string;
+  projectId: string;
+  site: string;
+  route: string;
+  startedAt: string;
+  durationMs: number;
+  lastObservedAt: string;
+  markerCount: number;
+  reportStatus: "pending" | "ready" | "failed" | string;
+  reportConfidence: number;
+  reportSymptom: string;
+}
+
 export interface SessionsState {
   activeMarkerId: string | null;
 }

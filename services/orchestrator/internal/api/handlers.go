@@ -121,6 +121,7 @@ func (h *Handler) Router() http.Handler {
 			r.With(h.requireWriteAccess).Post("/issues/promote", h.promoteIssues)
 			r.Get("/issues/stats", h.listIssueStats)
 			r.Get("/issues", h.listIssues)
+			r.Get("/issues/{clusterKey}/sessions", h.listIssueSessions)
 			r.Get("/sessions/{sessionID}", h.getSession)
 			r.Get("/sessions/{sessionID}/events", h.getSessionEvents)
 			r.With(h.requireKeyAccess).Get("/sessions/{sessionID}/artifacts/{artifactType}/token", h.createArtifactToken)
@@ -487,6 +488,37 @@ func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"issues": clusters})
+}
+
+func (h *Handler) listIssueSessions(w http.ResponseWriter, r *http.Request) {
+	clusterKey := strings.TrimSpace(chi.URLParam(r, "clusterKey"))
+	if clusterKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "clusterKey is required"})
+		return
+	}
+
+	limit := 30
+	if candidate := strings.TrimSpace(r.URL.Query().Get("limit")); candidate != "" {
+		parsed, err := strconv.Atoi(candidate)
+		if err != nil || parsed < 1 || parsed > 200 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be an integer between 1 and 200"})
+			return
+		}
+		limit = parsed
+	}
+
+	projectID := h.projectIDFromContext(r.Context())
+	sessions, err := h.store.ListIssueClusterSessions(r.Context(), projectID, clusterKey, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cluster sessions lookup failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"clusterKey": clusterKey,
+		"limit":      limit,
+		"sessions":   sessions,
+	})
 }
 
 func (h *Handler) listIssueStats(w http.ResponseWriter, r *http.Request) {
