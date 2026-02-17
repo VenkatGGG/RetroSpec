@@ -25,6 +25,13 @@ export interface QueueHealthSnapshot {
     retryDepth: number;
     failedDepth: number;
   };
+  thresholds: {
+    warningPending: number;
+    warningRetry: number;
+    criticalPending: number;
+    criticalRetry: number;
+    criticalFailed: number;
+  };
 }
 
 export const reportingApi = createApi({

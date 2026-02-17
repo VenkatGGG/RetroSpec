@@ -82,6 +82,7 @@ Optional background maintenance loops can be enabled with `AUTO_CLEANUP_INTERVAL
 Ingest can auto-promote clusters immediately (`AUTO_PROMOTE_ON_INGEST=true`) so repeated issues appear without waiting for scheduled/manual promotion.
 Set `ALERT_WEBHOOK_URL` to send outbound notifications when clusters are promoted above confidence threshold.
 Use `ALERT_AUTH_HEADER`, `ALERT_COOLDOWN_MINUTES`, and `ALERT_MIN_CLUSTER_CONFIDENCE` to control alert auth, dedupe window, and noise floor.
+Tune queue-health severity thresholds with `QUEUE_WARNING_PENDING`, `QUEUE_WARNING_RETRY`, `QUEUE_CRITICAL_PENDING`, `QUEUE_CRITICAL_RETRY`, and `QUEUE_CRITICAL_FAILED`.
 Issue trend stats are available at `GET /v1/issues/stats?hours=24`.
 Session-level AI report cards are available on `GET /v1/sessions/{sessionID}` under `reportCard`.
 Report cards use statuses: `pending`, `ready`, `failed`, and `discarded` (low-confidence filtered).

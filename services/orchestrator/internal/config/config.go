@@ -27,6 +27,11 @@ type Config struct {
 	AlertAuthHeader            string
 	AlertCooldownMinutes       int
 	AlertMinClusterConfidence  float64
+	QueueWarningPending        int
+	QueueWarningRetry          int
+	QueueCriticalPending       int
+	QueueCriticalRetry         int
+	QueueCriticalFailed        int
 	SessionRetentionDays       int
 	S3Region                   string
 	S3Endpoint                 string
@@ -60,6 +65,11 @@ func Load() Config {
 		AlertAuthHeader:            strings.TrimSpace(os.Getenv("ALERT_AUTH_HEADER")),
 		AlertCooldownMinutes:       envOrDefaultInt("ALERT_COOLDOWN_MINUTES", 60),
 		AlertMinClusterConfidence:  envOrDefaultFloat("ALERT_MIN_CLUSTER_CONFIDENCE", 0.7),
+		QueueWarningPending:        envOrDefaultInt("QUEUE_WARNING_PENDING", 5),
+		QueueWarningRetry:          envOrDefaultInt("QUEUE_WARNING_RETRY", 1),
+		QueueCriticalPending:       envOrDefaultInt("QUEUE_CRITICAL_PENDING", 50),
+		QueueCriticalRetry:         envOrDefaultInt("QUEUE_CRITICAL_RETRY", 10),
+		QueueCriticalFailed:        envOrDefaultInt("QUEUE_CRITICAL_FAILED", 1),
 		SessionRetentionDays:       envOrDefaultInt("SESSION_RETENTION_DAYS", 7),
 		S3Region:                   envOrDefault("S3_REGION", "us-east-1"),
 		S3Endpoint:                 os.Getenv("S3_ENDPOINT"),

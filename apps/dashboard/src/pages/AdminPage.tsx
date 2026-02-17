@@ -81,6 +81,13 @@ export function AdminPage() {
             <p>
               <strong>Generated:</strong> {new Date(queueHealth.generatedAt).toLocaleString()}
             </p>
+            <p>
+              Warning when pending ≥ {queueHealth.thresholds.warningPending} or retry ≥{" "}
+              {queueHealth.thresholds.warningRetry}. Critical when pending ≥{" "}
+              {queueHealth.thresholds.criticalPending}, retry ≥{" "}
+              {queueHealth.thresholds.criticalRetry}, or dead-letter ≥{" "}
+              {queueHealth.thresholds.criticalFailed}.
+            </p>
             <div className="queue-health-grid">
               <div className="stats-card">
                 <h3>Replay Queue</h3>

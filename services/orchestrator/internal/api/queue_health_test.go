@@ -79,6 +79,38 @@ func TestGetQueueHealthProviderError(t *testing.T) {
 	}
 }
 
+func TestGetQueueHealthWarningStatusByThreshold(t *testing.T) {
+	handler := &Handler{
+		queueStatsProvider: stubQueueStatsProvider{
+			stats: queue.QueueStats{
+				ReplayPending: 5,
+			},
+		},
+		queueWarningPending:  5,
+		queueWarningRetry:    1,
+		queueCriticalPending: 50,
+		queueCriticalRetry:   10,
+		queueCriticalFailed:  1,
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/queue-health", nil)
+	recorder := httptest.NewRecorder()
+	handler.getQueueHealth(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if body["status"] != "warning" {
+		t.Fatalf("expected warning status, got %v", body["status"])
+	}
+}
+
 func TestMetricsIncludesQueueDepthGauges(t *testing.T) {
 	metrics := newAPIMetrics(stubQueueStatsProvider{
 		stats: queue.QueueStats{

@@ -38,6 +38,11 @@ type Handler struct {
 	artifactTokenTTL         time.Duration
 	sessionRetentionDays     int
 	alertNotifier            *issueAlertNotifier
+	queueWarningPending      int
+	queueWarningRetry        int
+	queueCriticalPending     int
+	queueCriticalRetry       int
+	queueCriticalFailed      int
 }
 
 type requestContextKey string
@@ -64,6 +69,11 @@ func NewHandler(
 	alertAuthHeader string,
 	alertMinConfidence float64,
 	alertCooldownMinutes int,
+	queueWarningPending int,
+	queueWarningRetry int,
+	queueCriticalPending int,
+	queueCriticalRetry int,
+	queueCriticalFailed int,
 	artifactTokenSecret string,
 	artifactTokenTTLSeconds int,
 	sessionRetentionDays int,
@@ -94,6 +104,11 @@ func NewHandler(
 		artifactTokenTTL:     time.Duration(maxInt(60, artifactTokenTTLSeconds)) * time.Second,
 		sessionRetentionDays: sessionRetentionDays,
 		alertNotifier:        newIssueAlertNotifier(store, alertWebhookURL, alertAuthHeader, alertMinConfidence, alertCooldownMinutes),
+		queueWarningPending:  maxInt(0, queueWarningPending),
+		queueWarningRetry:    maxInt(0, queueWarningRetry),
+		queueCriticalPending: maxInt(0, queueCriticalPending),
+		queueCriticalRetry:   maxInt(0, queueCriticalRetry),
+		queueCriticalFailed:  maxInt(1, queueCriticalFailed),
 	}
 }
 
@@ -375,13 +390,39 @@ func (h *Handler) getQueueHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	warningPending := h.queueWarningPending
+	if warningPending < 1 {
+		warningPending = 5
+	}
+	warningRetry := h.queueWarningRetry
+	if warningRetry < 1 {
+		warningRetry = 1
+	}
+	criticalPending := h.queueCriticalPending
+	if criticalPending < 1 {
+		criticalPending = 50
+	}
+	criticalRetry := h.queueCriticalRetry
+	if criticalRetry < 1 {
+		criticalRetry = 10
+	}
+	criticalFailed := h.queueCriticalFailed
+	if criticalFailed < 1 {
+		criticalFailed = 1
+	}
+
 	status := "healthy"
-	if stats.ReplayFailedDepth > 0 || stats.AnalysisFailedDepth > 0 {
+	if stats.ReplayFailedDepth >= int64(criticalFailed) ||
+		stats.AnalysisFailedDepth >= int64(criticalFailed) ||
+		stats.ReplayPending >= int64(criticalPending) ||
+		stats.AnalysisPending >= int64(criticalPending) ||
+		stats.ReplayRetryDepth >= int64(criticalRetry) ||
+		stats.AnalysisRetryDepth >= int64(criticalRetry) {
 		status = "critical"
-	} else if stats.ReplayRetryDepth > 0 ||
-		stats.AnalysisRetryDepth > 0 ||
-		stats.ReplayPending > 0 ||
-		stats.AnalysisPending > 0 {
+	} else if stats.ReplayPending >= int64(warningPending) ||
+		stats.AnalysisPending >= int64(warningPending) ||
+		stats.ReplayRetryDepth >= int64(warningRetry) ||
+		stats.AnalysisRetryDepth >= int64(warningRetry) {
 		status = "warning"
 	}
 
@@ -399,6 +440,13 @@ func (h *Handler) getQueueHealth(w http.ResponseWriter, r *http.Request) {
 			"pending":     stats.AnalysisPending,
 			"retryDepth":  stats.AnalysisRetryDepth,
 			"failedDepth": stats.AnalysisFailedDepth,
+		},
+		"thresholds": map[string]int{
+			"warningPending":  warningPending,
+			"warningRetry":    warningRetry,
+			"criticalPending": criticalPending,
+			"criticalRetry":   criticalRetry,
+			"criticalFailed":  criticalFailed,
 		},
 	})
 }
