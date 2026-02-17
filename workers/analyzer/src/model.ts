@@ -1,6 +1,7 @@
 import type { AnalyzerWorkerConfig } from "./config.js";
 import { analyzeSession } from "./analyze.js";
 import type { AnalysisJobData, AnalysisReport } from "./types.js";
+import { z } from "zod";
 
 interface RemotePathResponse {
   symptom?: string;
@@ -16,6 +17,28 @@ interface RRWebEventLike {
 
 const MAX_REMOTE_EVENTS = 180;
 const MAX_REMOTE_PAYLOAD_CHARS = 45_000;
+const MODEL_REQUEST_SCHEMA_VERSION = "retrospec.analysis.v1";
+
+const contractText = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return value;
+  }
+  return value.trim();
+}, z.string().min(3).max(2000));
+
+const remotePathResponseSchema = z.object({
+  symptom: contractText.optional(),
+  technicalRootCause: contractText.optional(),
+  rootCause: contractText.optional(),
+  cause: contractText.optional(),
+  suggestedFix: contractText.optional(),
+  fix: contractText.optional(),
+  recommendation: contractText.optional(),
+  summary: contractText.optional(),
+  textSummary: contractText.optional(),
+  visualSummary: contractText.optional(),
+  confidence: z.number().min(0).max(1).optional(),
+}).strict();
 
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) {
@@ -111,32 +134,34 @@ function summarizeEvents(rawEvents: unknown, markerOffsetsMs: number[]): {
 }
 
 function parseRemotePathResponse(raw: unknown): RemotePathResponse {
-  if (!raw || typeof raw !== "object") {
-    return {};
+  const parsed = remotePathResponseSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(`remote model response does not match contract: ${parsed.error.issues.map((issue) => issue.path.join(".")).join(",")}`);
   }
-  const source = raw as Record<string, unknown>;
-  const technicalRootCause =
-    toStringIfNonEmpty(source.technicalRootCause) ||
-    toStringIfNonEmpty(source.rootCause) ||
-    toStringIfNonEmpty(source.cause);
-  const suggestedFix =
-    toStringIfNonEmpty(source.suggestedFix) ||
-    toStringIfNonEmpty(source.fix) ||
-    toStringIfNonEmpty(source.recommendation);
-  const summary =
-    toStringIfNonEmpty(source.summary) ||
-    toStringIfNonEmpty(source.textSummary) ||
-    toStringIfNonEmpty(source.visualSummary);
-  const confidenceRaw = source.confidence;
-  const confidence = typeof confidenceRaw === "number" ? clamp01(confidenceRaw) : undefined;
 
-  return {
+  const source = parsed.data;
+  const response = {
     symptom: toStringIfNonEmpty(source.symptom),
-    technicalRootCause,
-    suggestedFix,
-    summary,
-    confidence,
+    technicalRootCause:
+      toStringIfNonEmpty(source.technicalRootCause) ||
+      toStringIfNonEmpty(source.rootCause) ||
+      toStringIfNonEmpty(source.cause),
+    suggestedFix:
+      toStringIfNonEmpty(source.suggestedFix) ||
+      toStringIfNonEmpty(source.fix) ||
+      toStringIfNonEmpty(source.recommendation),
+    summary:
+      toStringIfNonEmpty(source.summary) ||
+      toStringIfNonEmpty(source.textSummary) ||
+      toStringIfNonEmpty(source.visualSummary),
+    confidence: typeof source.confidence === "number" ? clamp01(source.confidence) : undefined,
   };
+
+  if (!response.symptom && !response.technicalRootCause && !response.suggestedFix && !response.summary) {
+    throw new Error("remote model response did not provide any usable report fields");
+  }
+
+  return response;
 }
 
 async function postModelRequest(
@@ -170,6 +195,8 @@ async function postModelRequest(
       },
       signal: controller.signal,
       body: JSON.stringify({
+        schemaVersion: MODEL_REQUEST_SCHEMA_VERSION,
+        expectedResponseSchema: "symptom|technicalRootCause|suggestedFix|summary|confidence",
         mode,
         projectId: job.projectId,
         sessionId: job.sessionId,
