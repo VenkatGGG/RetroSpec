@@ -183,6 +183,15 @@
   gap: 0.5rem;
 }
 
+.report-grid {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.report-grid p {
+  margin: 0;
+}
+
 .replay-video {
   background: #0b111f;
   border: 1px solid #1f2a44;

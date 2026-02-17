@@ -31,6 +31,22 @@ export interface SessionArtifact {
   windows: ArtifactWindow[];
 }
 
+export interface SessionReportCard {
+  id: string;
+  projectId: string;
+  sessionId: string;
+  status: "pending" | "ready" | "failed";
+  symptom: string;
+  technicalRootCause: string;
+  suggestedFix: string;
+  textSummary: string;
+  visualSummary: string;
+  confidence: number;
+  generatedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SessionSummary {
   id: string;
   site: string;
@@ -41,6 +57,7 @@ export interface SessionSummary {
   createdAt?: string;
   markers: ErrorMarker[];
   artifacts: SessionArtifact[];
+  reportCard?: SessionReportCard;
 }
 
 export interface IssueCluster {

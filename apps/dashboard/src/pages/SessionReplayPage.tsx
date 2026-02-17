@@ -67,6 +67,7 @@ export function SessionReplayPage() {
     activeSession.artifacts.find((artifact) => artifact.artifactType === "analysis_json") ??
     activeSession.artifacts?.[0] ??
     null;
+  const reportCard = activeSession.reportCard ?? null;
   const replayVideoSource = replayVideoArtifact?.status === "ready" && replayVideoToken?.token
     ? `${apiBaseUrl}/v1/sessions/${activeSession.id}/artifacts/replay_video?artifactToken=${encodeURIComponent(replayVideoToken.token)}`
     : "";
@@ -82,6 +83,45 @@ export function SessionReplayPage() {
         </div>
         <Link to="/">Back to issue clusters</Link>
       </div>
+      {reportCard && (
+        <article className="artifact-card report-card">
+          <header className="artifact-card-header">
+            <h2>Session Report Card</h2>
+            <span>{new Date(reportCard.generatedAt).toLocaleString()}</span>
+          </header>
+          <p>
+            <strong>Status:</strong> {reportCard.status} | <strong>Confidence:</strong>{" "}
+            {(Math.max(0, Math.min(1, reportCard.confidence)) * 100).toFixed(0)}%
+          </p>
+          {reportCard.status === "pending" && (
+            <p className="replay-status">Analysis in progress. This card updates asynchronously.</p>
+          )}
+          {reportCard.status === "failed" && (
+            <p className="replay-status error">
+              {reportCard.technicalRootCause || "Analysis worker failed before producing a report."}
+            </p>
+          )}
+          {reportCard.status === "ready" && (
+            <div className="report-grid">
+              <p>
+                <strong>Symptom:</strong> {reportCard.symptom}
+              </p>
+              <p>
+                <strong>Technical Root Cause:</strong> {reportCard.technicalRootCause}
+              </p>
+              <p>
+                <strong>Suggested Fix:</strong> {reportCard.suggestedFix}
+              </p>
+              <p>
+                <strong>Text Path Evidence:</strong> {reportCard.textSummary}
+              </p>
+              <p>
+                <strong>Visual Path Evidence:</strong> {reportCard.visualSummary}
+              </p>
+            </div>
+          )}
+        </article>
+      )}
       {analysisArtifact && (
         <article className="artifact-card">
           <header className="artifact-card-header">
