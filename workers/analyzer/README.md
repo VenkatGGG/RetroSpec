@@ -5,6 +5,7 @@ Async worker that consumes `analysis-jobs` from Redis and writes per-session rep
 ## Current Behavior
 
 - Consumes analysis jobs from Redis Stream (`analysis-jobs` by default) using a consumer group.
+- Automatically migrates legacy Redis list queues to stream format on startup.
 - Reads rrweb event JSON from S3-compatible storage.
 - Receives marker hint context (label + evidence) from orchestrator jobs and uses it during report generation.
 - Supports provider modes:

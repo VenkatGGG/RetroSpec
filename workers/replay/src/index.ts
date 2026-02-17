@@ -102,7 +102,46 @@ function parseStreamMessages(raw: unknown): StreamMessage[] {
   return messages;
 }
 
+async function ensureStreamQueue(): Promise<void> {
+  const queueType = await redis.type(queueName);
+  if (queueType === "none" || queueType === "stream") {
+    return;
+  }
+
+  if (queueType !== "list") {
+    throw new Error(`unsupported redis key type for queue ${queueName}: ${queueType}`);
+  }
+
+  const legacyQueueName = `${queueName}:legacy:list:${Date.now()}`;
+  const renamed = await redis.renamenx(queueName, legacyQueueName);
+  if (renamed !== 1) {
+    const refreshedType = await redis.type(queueName);
+    if (refreshedType === "none" || refreshedType === "stream") {
+      return;
+    }
+    if (refreshedType === "list") {
+      throw new Error(`legacy list queue migration contention for ${queueName}`);
+    }
+    throw new Error(`unsupported redis key type for queue ${queueName}: ${refreshedType}`);
+  }
+
+  let migrated = 0;
+  while (true) {
+    const payload = await redis.rpop(legacyQueueName);
+    if (!payload) {
+      break;
+    }
+    await redis.xadd(queueName, "*", "payload", payload);
+    migrated += 1;
+  }
+  await redis.del(legacyQueueName);
+  if (migrated > 0) {
+    console.warn(`[replay-worker] migrated legacy list queue=${queueName} entries=${migrated}`);
+  }
+}
+
 async function ensureConsumerGroup(): Promise<void> {
+  await ensureStreamQueue();
   try {
     await redis.xgroup("CREATE", queueName, groupName, "0", "MKSTREAM");
   } catch (error) {

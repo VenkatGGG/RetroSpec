@@ -5,6 +5,7 @@ Async worker that consumes replay jobs from Redis, validates rrweb event blobs, 
 ## Current Behavior
 
 - Consumes JSON payload jobs from Redis Stream (`replay-jobs` by default) using a consumer group.
+- Automatically migrates legacy Redis list queues to stream format on startup.
 - Loads rrweb events from object storage.
 - Validates basic rrweb event structure.
 - Writes marker-window artifact JSON back to storage.
