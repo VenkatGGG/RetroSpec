@@ -28,7 +28,7 @@ export interface ReplayArtifactReport {
   triggerKind: ReplayJobData["triggerKind"];
   artifactType: "analysis_json" | "replay_video";
   artifactKey: string;
-  status: "ready" | "failed";
+  status: "ready" | "failed" | "skipped";
   generatedAt: string;
   windows: MarkerWindow[];
 }

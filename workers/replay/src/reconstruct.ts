@@ -4,6 +4,11 @@ import type { ReplayJobData, ReplayResult } from "./types.js";
 import { renderReplayWebm } from "./render.js";
 import { loadEventsBlob, storeArtifact, storeBinaryArtifact } from "./s3.js";
 
+interface ReplayProcessingOptions {
+  renderEnabled?: boolean;
+  renderSkipReason?: string;
+}
+
 const rrwebEventSchema = z.object({
   type: z.number(),
   timestamp: z.number(),
@@ -18,7 +23,10 @@ function markerWindows(offsetsMs: number[]): Array<{ startMs: number; endMs: num
   }));
 }
 
-export async function processReplayJob(data: ReplayJobData): Promise<ReplayResult> {
+export async function processReplayJob(
+  data: ReplayJobData,
+  options: ReplayProcessingOptions = {},
+): Promise<ReplayResult> {
   const config = loadConfig();
   const eventsBlob = await loadEventsBlob(data.eventsObjectKey);
 
@@ -28,8 +36,9 @@ export async function processReplayJob(data: ReplayJobData): Promise<ReplayResul
   let videoArtifactKey = "";
   let renderStatus: "ready" | "failed" | "skipped" = "skipped";
   let renderError = "";
+  const shouldRender = options.renderEnabled ?? config.renderEnabled;
 
-  if (config.renderEnabled) {
+  if (shouldRender) {
     try {
       const videoBuffer = await renderReplayWebm(replayEvents, config);
       videoArtifactKey = `${config.artifactPrefix}${data.sessionId}/full-replay.webm`;
@@ -39,6 +48,12 @@ export async function processReplayJob(data: ReplayJobData): Promise<ReplayResul
       renderStatus = "failed";
       renderError = error instanceof Error ? error.message : String(error);
     }
+  } else if (options.renderSkipReason && options.renderSkipReason.trim() !== "") {
+    renderError = options.renderSkipReason.trim();
+  } else if (!config.renderEnabled) {
+    renderError = "video rendering disabled by worker configuration";
+  } else {
+    renderError = "video rendering skipped by replay policy";
   }
 
   const artifact = {

@@ -180,8 +180,13 @@ export function SessionReplayPage() {
             <strong>Status:</strong> {replayVideoArtifact.status} | <strong>Key:</strong>{" "}
             <code>{replayVideoArtifact.artifactKey}</code>
           </p>
-          {replayVideoArtifact.status !== "ready" && (
+          {replayVideoArtifact.status === "failed" && (
             <p className="replay-status error">Video render failed for this session. Inspect analysis.json for details.</p>
+          )}
+          {replayVideoArtifact.status === "skipped" && (
+            <p className="replay-status">
+              Video rendering was skipped by replay worker policy (quota or cooldown).
+            </p>
           )}
           {replayVideoArtifact.status === "ready" && isReplayTokenFetching && (
             <p className="replay-status">Preparing secure playback...</p>

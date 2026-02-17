@@ -9,6 +9,9 @@ export interface ReplayWorkerConfig {
   renderMaxDurationMs: number;
   renderViewportWidth: number;
   renderViewportHeight: number;
+  renderDailyLimitPerProject: number;
+  renderDailyLimitGlobal: number;
+  renderMinIntervalSecPerProject: number;
   maxAttempts: number;
   retryBaseMs: number;
   dedupeWindowSec: number;
@@ -33,6 +36,9 @@ export function loadConfig(): ReplayWorkerConfig {
     renderMaxDurationMs: envOrDefaultNumber("REPLAY_RENDER_MAX_DURATION_MS", 120_000),
     renderViewportWidth: envOrDefaultNumber("REPLAY_RENDER_VIEWPORT_WIDTH", 1280),
     renderViewportHeight: envOrDefaultNumber("REPLAY_RENDER_VIEWPORT_HEIGHT", 720),
+    renderDailyLimitPerProject: envOrDefaultNumber("REPLAY_RENDER_DAILY_LIMIT_PER_PROJECT", 0),
+    renderDailyLimitGlobal: envOrDefaultNumber("REPLAY_RENDER_DAILY_LIMIT_GLOBAL", 0),
+    renderMinIntervalSecPerProject: envOrDefaultNumber("REPLAY_RENDER_MIN_INTERVAL_SEC_PER_PROJECT", 0),
     maxAttempts: envOrDefaultNumber("REPLAY_MAX_ATTEMPTS", 3),
     retryBaseMs: envOrDefaultNumber("REPLAY_RETRY_BASE_MS", 2_000),
     dedupeWindowSec: envOrDefaultNumber("REPLAY_DEDUPE_WINDOW_SEC", 21_600),

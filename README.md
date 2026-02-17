@@ -71,6 +71,7 @@ For `dual_http`, configure:
 Use `ANALYZER_MIN_ACCEPT_CONFIDENCE` + `ANALYZER_DISCARD_UNCERTAIN=true` to discard low-confidence AI verdicts instead of surfacing them as ready reports.
 Set `ARTIFACT_TOKEN_SECRET` to enable short-lived signed artifact playback tokens (defaults to `INTERNAL_API_KEY` if omitted).
 Set `REPLAY_RENDER_ENABLED=true` on the replay worker to render full-session `.webm` assets via Playwright.
+Use `REPLAY_RENDER_DAILY_LIMIT_PER_PROJECT`, `REPLAY_RENDER_DAILY_LIMIT_GLOBAL`, and `REPLAY_RENDER_MIN_INTERVAL_SEC_PER_PROJECT` to cap video render spend.
 Replay worker retries failed jobs automatically (`REPLAY_MAX_ATTEMPTS`, `REPLAY_RETRY_BASE_MS`) before dead-lettering.
 Replay worker deduplicates repeated payloads for a TTL window (`REPLAY_DEDUPE_WINDOW_SEC`).
 Replay/analyzer workers reclaim stale in-flight jobs with `REPLAY_PROCESSING_STALE_SEC` and `ANALYZER_PROCESSING_STALE_SEC`.

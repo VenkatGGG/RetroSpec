@@ -10,4 +10,5 @@ Async worker that consumes replay jobs from Redis, validates rrweb event blobs, 
 - Validates basic rrweb event structure.
 - Writes marker-window artifact JSON back to storage.
 - Optionally renders full-session replay video (`.webm`) with Playwright.
+- Enforces optional render spend controls (daily project/global quotas and per-project cooldown interval).
 - Retries failures with exponential backoff, reclaims stale pending messages (`REPLAY_PROCESSING_STALE_SEC`), and dead-letters exhausted payloads (`replay-jobs:failed`).

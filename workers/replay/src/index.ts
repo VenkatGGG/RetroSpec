@@ -35,10 +35,24 @@ const redis = new Redis({
 
 let shuttingDown = false;
 
+interface RenderPolicyDecision {
+  renderEnabled: boolean;
+  skipReason?: string;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function utcDayKey(date: Date = new Date()): string {
+  return date.toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+function secondsUntilNextUTCDay(now: Date = new Date()): number {
+  const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0);
+  return Math.max(60, Math.ceil((next - now.getTime()) / 1000) + 300);
 }
 
 function jobFingerprint(parsed: z.infer<typeof replayJobSchema>): string {
@@ -229,6 +243,95 @@ async function acknowledgeMessage(messageID: string): Promise<void> {
   await redis.multi().xack(queueName, groupName, messageID).xdel(queueName, messageID).exec();
 }
 
+async function reserveDailyRenderBudget(counterKey: string, limit: number, ttlSec: number): Promise<boolean> {
+  if (limit < 1) {
+    return true;
+  }
+
+  const count = await redis.incr(counterKey);
+  if (count === 1) {
+    await redis.expire(counterKey, ttlSec);
+  }
+  if (count > limit) {
+    await redis.decr(counterKey);
+    return false;
+  }
+  return true;
+}
+
+async function rollbackReservedBudgets(counterKeys: string[]): Promise<void> {
+  for (const key of counterKeys) {
+    try {
+      const remaining = await redis.decr(key);
+      if (remaining <= 0) {
+        await redis.del(key);
+      }
+    } catch {
+      // Best-effort rollback only; do not fail job processing over quota-counter cleanup.
+    }
+  }
+}
+
+async function claimRenderPolicy(projectID: string): Promise<RenderPolicyDecision> {
+  if (!config.renderEnabled) {
+    return {
+      renderEnabled: false,
+      skipReason: "video rendering disabled by worker configuration",
+    };
+  }
+
+  const reservedKeys: string[] = [];
+  const dailyTTL = secondsUntilNextUTCDay();
+  const dayKey = utcDayKey();
+  const perProjectDailyLimit = Math.max(0, Math.floor(config.renderDailyLimitPerProject));
+  if (perProjectDailyLimit > 0) {
+    const key = `${queueName}:render:quota:project:${projectID}:${dayKey}`;
+    const reserved = await reserveDailyRenderBudget(key, perProjectDailyLimit, dailyTTL);
+    if (!reserved) {
+      return {
+        renderEnabled: false,
+        skipReason: `render skipped: project daily quota reached (${perProjectDailyLimit})`,
+      };
+    }
+    reservedKeys.push(key);
+  }
+
+  const globalDailyLimit = Math.max(0, Math.floor(config.renderDailyLimitGlobal));
+  if (globalDailyLimit > 0) {
+    const key = `${queueName}:render:quota:global:${dayKey}`;
+    const reserved = await reserveDailyRenderBudget(key, globalDailyLimit, dailyTTL);
+    if (!reserved) {
+      await rollbackReservedBudgets(reservedKeys);
+      return {
+        renderEnabled: false,
+        skipReason: `render skipped: global daily quota reached (${globalDailyLimit})`,
+      };
+    }
+    reservedKeys.push(key);
+  }
+
+  const minProjectIntervalSec = Math.max(0, Math.floor(config.renderMinIntervalSecPerProject));
+  if (minProjectIntervalSec > 0) {
+    const cooldownKey = `${queueName}:render:cooldown:${projectID}`;
+    const lockStatus = await redis.set(
+      cooldownKey,
+      String(Date.now()),
+      "EX",
+      String(minProjectIntervalSec),
+      "NX",
+    );
+    if (lockStatus !== "OK") {
+      await rollbackReservedBudgets(reservedKeys);
+      return {
+        renderEnabled: false,
+        skipReason: `render skipped: project cooldown active (${minProjectIntervalSec}s)`,
+      };
+    }
+  }
+
+  return { renderEnabled: true };
+}
+
 async function handleMessage(message: StreamMessage): Promise<void> {
   let parsed: z.infer<typeof replayJobSchema> | null = null;
   let shouldAcknowledge = false;
@@ -245,7 +348,17 @@ async function handleMessage(message: StreamMessage): Promise<void> {
       return;
     }
 
-    const result = await processReplayJob(parsed);
+    const renderPolicy = await claimRenderPolicy(parsed.projectId);
+    if (!renderPolicy.renderEnabled && renderPolicy.skipReason) {
+      console.warn(
+        `[replay-worker] render skipped session=${parsed.sessionId} project=${parsed.projectId} reason="${renderPolicy.skipReason}"`,
+      );
+    }
+
+    const result = await processReplayJob(parsed, {
+      renderEnabled: renderPolicy.renderEnabled,
+      renderSkipReason: renderPolicy.skipReason,
+    });
     await reportReplayArtifact(config, {
       projectId: parsed.projectId,
       sessionId: result.sessionId,
@@ -275,6 +388,17 @@ async function handleMessage(message: StreamMessage): Promise<void> {
         artifactType: "replay_video",
         artifactKey: "",
         status: "failed",
+        generatedAt: result.generatedAt,
+        windows: result.markerWindows,
+      });
+    } else if (result.videoStatus === "skipped") {
+      await reportReplayArtifact(config, {
+        projectId: parsed.projectId,
+        sessionId: result.sessionId,
+        triggerKind: parsed.triggerKind,
+        artifactType: "replay_video",
+        artifactKey: "",
+        status: "skipped",
         generatedAt: result.generatedAt,
         windows: result.markerWindows,
       });
