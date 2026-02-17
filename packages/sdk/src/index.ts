@@ -12,6 +12,7 @@ interface InternalState {
   startedAt: Date;
   events: eventWithTime[];
   markers: RetrospecMarker[];
+  breadcrumbs: string[];
   lastFlushedMarkerCount: number;
   lastFlushedEventTimestamp: number;
 }
@@ -49,6 +50,7 @@ export function initRetrospec(options: RetrospecInitOptions): RetrospecClient {
     startedAt: new Date(),
     events: [],
     markers: [],
+    breadcrumbs: [],
     lastFlushedMarkerCount: 0,
     lastFlushedEventTimestamp: 0,
   };
@@ -235,18 +237,25 @@ async function ingestSession(
 
 function instrumentJSErrors(state: InternalState): () => void {
   const onError = (event: ErrorEvent) => {
+    const source = `${event.filename || "inline"}:${event.lineno || 0}:${event.colno || 0}`;
+    const stack = toStackSnippet(event.error);
+    appendBreadcrumb(state, `js_error:${source}:${normalizeToken(event.message || "error")}`);
     pushMarker(state, {
       kind: "js_exception",
       label: event.message || "Unhandled error",
       clusterHint: event.filename || "runtime",
+      evidence: compactEvidence([source, stack, recentBreadcrumbs(state)]),
     });
   };
 
   const onRejection = (event: PromiseRejectionEvent) => {
+    const reason = toErrorReason(event.reason);
+    appendBreadcrumb(state, `promise_rejection:${normalizeToken(reason)}`);
     pushMarker(state, {
       kind: "js_exception",
-      label: `Unhandled promise rejection: ${String(event.reason)}`,
+      label: `Unhandled promise rejection: ${reason}`,
       clusterHint: "promise-rejection",
+      evidence: compactEvidence([toStackSnippet(event.reason), recentBreadcrumbs(state)]),
     });
   };
 
@@ -262,10 +271,12 @@ function instrumentJSErrors(state: InternalState): () => void {
 function instrumentConsoleErrors(state: InternalState): () => void {
   const original = console.error;
   console.error = (...args: unknown[]) => {
+    appendBreadcrumb(state, `console_error:${normalizeToken(stringifyConsoleArgs(args).slice(0, 60))}`);
     pushMarker(state, {
       kind: "js_exception",
       label: stringifyConsoleArgs(args),
       clusterHint: "console-error",
+      evidence: compactEvidence([extractConsoleStack(args), recentBreadcrumbs(state)]),
     });
     original(...args);
   };
@@ -284,18 +295,27 @@ function instrumentFetchFailures(state: InternalState): () => void {
     try {
       const response = await originalFetch(...args);
       if (response.status >= 400) {
+        appendBreadcrumb(state, `fetch:${method}:${normalizePath(extractUrl(input))}:${response.status}`);
         pushMarker(state, {
           kind: "api_error",
           label: `${method} ${extractUrl(input)} -> ${response.status}`,
           clusterHint: `${method}:${normalizePath(extractUrl(input))}:${Math.floor(response.status / 100)}xx`,
+          evidence: compactEvidence([
+            `statusText=${response.statusText || "unknown"}`,
+            `route=${normalizePath(window.location.pathname)}`,
+            recentBreadcrumbs(state),
+          ]),
         });
       }
       return response;
     } catch (error) {
+      const reason = toErrorReason(error);
+      appendBreadcrumb(state, `fetch:${method}:${normalizePath(extractUrl(input))}:network`);
       pushMarker(state, {
         kind: "api_error",
         label: `${method} ${extractUrl(input)} -> network_error`,
         clusterHint: `${method}:${normalizePath(extractUrl(input))}:network`,
+        evidence: compactEvidence([`reason=${reason}`, toStackSnippet(error), recentBreadcrumbs(state)]),
       });
       throw error;
     }
@@ -338,27 +358,37 @@ function instrumentXHRFailures(state: InternalState): () => void {
     };
     const onLoadEnd = () => {
       if (this.status >= 400) {
+        appendBreadcrumb(state, `xhr:${method}:${normalizePath(url)}:${this.status}`);
         pushMarker(state, {
           kind: "api_error",
           label: `${method} ${url} -> ${this.status}`,
           clusterHint: `${method}:${normalizePath(url)}:${Math.floor(this.status / 100)}xx`,
+          evidence: compactEvidence([
+            `statusText=${this.statusText || "unknown"}`,
+            `route=${normalizePath(window.location.pathname)}`,
+            recentBreadcrumbs(state),
+          ]),
         });
       }
       cleanup();
     };
     const onError = () => {
+      appendBreadcrumb(state, `xhr:${method}:${normalizePath(url)}:network`);
       pushMarker(state, {
         kind: "api_error",
         label: `${method} ${url} -> network_error`,
         clusterHint: `${method}:${normalizePath(url)}:network`,
+        evidence: compactEvidence([`statusText=${this.statusText || "unknown"}`, recentBreadcrumbs(state)]),
       });
       cleanup();
     };
     const onTimeout = () => {
+      appendBreadcrumb(state, `xhr:${method}:${normalizePath(url)}:timeout`);
       pushMarker(state, {
         kind: "api_error",
         label: `${method} ${url} -> timeout`,
         clusterHint: `${method}:${normalizePath(url)}:timeout`,
+        evidence: compactEvidence([`statusText=${this.statusText || "unknown"}`, recentBreadcrumbs(state)]),
       });
       cleanup();
     };
@@ -381,7 +411,7 @@ function instrumentXHRFailures(state: InternalState): () => void {
 
 function pushMarker(
   state: InternalState,
-  input: { kind: MarkerKind; label: string; clusterHint: string },
+  input: { kind: MarkerKind; label: string; clusterHint: string; evidence?: string },
 ): void {
   const offset = Date.now() - state.startedAt.getTime();
   const clusterKey = `${input.kind}:${input.clusterHint}`;
@@ -397,10 +427,73 @@ function pushMarker(
   state.markers.push({
     id: generateId(),
     clusterKey,
-    label: input.label.slice(0, 220),
+    label: `${input.label}${input.evidence ? ` | ${input.evidence}` : ""}`.slice(0, 220),
     replayOffsetMs: Math.max(0, offset),
     kind: input.kind,
   });
+}
+
+function appendBreadcrumb(state: InternalState, value: string): void {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return;
+  }
+  state.breadcrumbs.push(trimmed.slice(0, 140));
+  if (state.breadcrumbs.length > 20) {
+    state.breadcrumbs.splice(0, state.breadcrumbs.length - 20);
+  }
+}
+
+function recentBreadcrumbs(state: InternalState): string {
+  if (state.breadcrumbs.length === 0) {
+    return "";
+  }
+  return `trail=${state.breadcrumbs.slice(-3).join(" <- ")}`;
+}
+
+function compactEvidence(items: Array<string | undefined>): string {
+  return items
+    .map((item) => (item || "").trim())
+    .filter((item) => item.length > 0)
+    .join(" | ")
+    .slice(0, 150);
+}
+
+function toErrorReason(value: unknown): string {
+  if (value instanceof Error) {
+    return value.message || value.name;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function toStackSnippet(value: unknown): string {
+  if (value instanceof Error && value.stack) {
+    return value.stack.split("\n").slice(0, 2).join(" ").slice(0, 120);
+  }
+  if (value && typeof value === "object" && "stack" in (value as Record<string, unknown>)) {
+    const stackValue = (value as Record<string, unknown>).stack;
+    if (typeof stackValue === "string") {
+      return stackValue.split("\n").slice(0, 2).join(" ").slice(0, 120);
+    }
+  }
+  return "";
+}
+
+function extractConsoleStack(args: unknown[]): string {
+  for (const arg of args) {
+    const stack = toStackSnippet(arg);
+    if (stack) {
+      return stack;
+    }
+  }
+  return "";
 }
 
 function instrumentRageClicks(
@@ -420,7 +513,7 @@ function instrumentRageClicks(
     recentClicks.push({ at: now, signature });
     while (recentClicks.length > 0) {
       const firstClick = recentClicks[0];
-      if (!firstClick || now-firstClick.at <= windowMs) {
+      if (!firstClick || now - firstClick.at <= windowMs) {
         break;
       }
       recentClicks.shift();
