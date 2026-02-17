@@ -126,9 +126,7 @@ func main() {
 		db,
 		artifactStore,
 		time.Duration(cfg.AutoCleanupIntervalMinutes)*time.Minute,
-		time.Duration(cfg.AutoPromoteIntervalMinutes)*time.Minute,
 		cfg.SessionRetentionDays,
-		cfg.ClusterPromoteMinSessions,
 	)
 
 	go func() {

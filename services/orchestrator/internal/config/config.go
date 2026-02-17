@@ -20,7 +20,6 @@ type Config struct {
 	RateLimitRequestsPerSec    float64
 	RateLimitBurst             int
 	AutoCleanupIntervalMinutes int
-	AutoPromoteIntervalMinutes int
 	AutoPromoteOnIngest        bool
 	AlertWebhookURL            string
 	AlertAuthHeader            string
@@ -60,7 +59,6 @@ func Load() Config {
 		RateLimitRequestsPerSec:    envOrDefaultFloat("RATE_LIMIT_REQUESTS_PER_SEC", 25),
 		RateLimitBurst:             envOrDefaultInt("RATE_LIMIT_BURST", 50),
 		AutoCleanupIntervalMinutes: envOrDefaultInt("AUTO_CLEANUP_INTERVAL_MINUTES", 0),
-		AutoPromoteIntervalMinutes: envOrDefaultInt("AUTO_PROMOTE_INTERVAL_MINUTES", 0),
 		AutoPromoteOnIngest:        envOrDefaultBool("AUTO_PROMOTE_ON_INGEST", true),
 		AlertWebhookURL:            strings.TrimSpace(os.Getenv("ALERT_WEBHOOK_URL")),
 		AlertAuthHeader:            strings.TrimSpace(os.Getenv("ALERT_AUTH_HEADER")),
