@@ -41,6 +41,7 @@ RetroSpec is an async web reliability platform that captures browser session eve
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/005_session_report_cards.sql`
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/006_issue_cluster_states.sql`
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/007_issue_alert_events.sql`
+   - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/008_error_markers_evidence.sql`
 4. Start services:
    - `npm install`
    - `npx playwright install chromium` (required only if `REPLAY_RENDER_ENABLED=true`)

@@ -21,6 +21,7 @@ type ErrorMark struct {
 	SessionID      string    `json:"sessionId"`
 	ClusterKey     string    `json:"clusterKey"`
 	Label          string    `json:"label"`
+	Evidence       string    `json:"evidence,omitempty"`
 	ReplayOffsetMs int       `json:"replayOffsetMs"`
 	Kind           string    `json:"kind"`
 	ObservedAt     time.Time `json:"observedAt"`
@@ -94,6 +95,7 @@ type ErrorMarkerInput struct {
 	ID             string `json:"id"`
 	ClusterKey     string `json:"clusterKey"`
 	Label          string `json:"label"`
+	Evidence       string `json:"evidence,omitempty"`
 	ReplayOffsetMs int    `json:"replayOffsetMs"`
 	Kind           string `json:"kind"`
 }

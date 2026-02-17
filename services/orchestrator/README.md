@@ -31,6 +31,7 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 6. Apply SQL in `db/migrations/005_session_report_cards.sql`.
 7. Apply SQL in `db/migrations/006_issue_cluster_states.sql`.
 8. Apply SQL in `db/migrations/007_issue_alert_events.sql`.
+9. Apply SQL in `db/migrations/008_error_markers_evidence.sql`.
 5. Start API:
 
 ```bash

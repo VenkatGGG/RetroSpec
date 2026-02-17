@@ -8,6 +8,7 @@ export interface ErrorMarker {
   id: string;
   clusterKey: string;
   label: string;
+  evidence?: string;
   replayOffsetMs: number;
   kind: FailureKind;
 }

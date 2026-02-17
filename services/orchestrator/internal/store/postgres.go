@@ -116,6 +116,7 @@ func (p *Postgres) Ingest(ctx context.Context, projectID string, payload IngestP
 		if label == "" {
 			label = kind
 		}
+		evidence := strings.TrimSpace(marker.Evidence)
 		replayOffsetMs := marker.ReplayOffsetMs
 		if replayOffsetMs < 0 {
 			replayOffsetMs = 0
@@ -125,18 +126,20 @@ func (p *Postgres) Ingest(ctx context.Context, projectID string, payload IngestP
 		stored := ErrorMark{}
 		err := tx.QueryRow(
 			ctx,
-			`INSERT INTO error_markers (id, session_id, cluster_key, label, replay_offset_ms, kind)
-			 VALUES ($1, $2, $3, $4, $5, $6)
+			`INSERT INTO error_markers (id, session_id, cluster_key, label, evidence, replay_offset_ms, kind)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)
 			 ON CONFLICT (id) DO UPDATE
 			 SET cluster_key = EXCLUDED.cluster_key,
 			     label = EXCLUDED.label,
+			     evidence = EXCLUDED.evidence,
 			     replay_offset_ms = EXCLUDED.replay_offset_ms,
 			     kind = EXCLUDED.kind
-			 RETURNING id, session_id, cluster_key, label, replay_offset_ms, kind, observed_at`,
+			 RETURNING id, session_id, cluster_key, label, evidence, replay_offset_ms, kind, observed_at`,
 			markerID,
 			sessionID,
 			clusterKey,
 			label,
+			evidence,
 			replayOffsetMs,
 			kind,
 		).Scan(
@@ -144,6 +147,7 @@ func (p *Postgres) Ingest(ctx context.Context, projectID string, payload IngestP
 			&stored.SessionID,
 			&stored.ClusterKey,
 			&stored.Label,
+			&stored.Evidence,
 			&stored.ReplayOffsetMs,
 			&stored.Kind,
 			&stored.ObservedAt,
@@ -684,7 +688,7 @@ func (p *Postgres) GetSession(ctx context.Context, projectID, id string) (Sessio
 
 	rows, err := p.pool.Query(
 		ctx,
-		`SELECT id, session_id, cluster_key, label, replay_offset_ms, kind, observed_at
+		`SELECT id, session_id, cluster_key, label, evidence, replay_offset_ms, kind, observed_at
 		 FROM error_markers
 		 WHERE session_id = $1
 		 ORDER BY replay_offset_ms ASC`,
@@ -703,6 +707,7 @@ func (p *Postgres) GetSession(ctx context.Context, projectID, id string) (Sessio
 			&marker.SessionID,
 			&marker.ClusterKey,
 			&marker.Label,
+			&marker.Evidence,
 			&marker.ReplayOffsetMs,
 			&marker.Kind,
 			&marker.ObservedAt,

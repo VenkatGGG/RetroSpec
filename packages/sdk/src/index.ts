@@ -427,7 +427,8 @@ function pushMarker(
   state.markers.push({
     id: generateId(),
     clusterKey,
-    label: `${input.label}${input.evidence ? ` | ${input.evidence}` : ""}`.slice(0, 220),
+    label: input.label.slice(0, 220),
+    evidence: (input.evidence || "").trim().slice(0, 180),
     replayOffsetMs: Math.max(0, offset),
     kind: input.kind,
   });

@@ -142,7 +142,7 @@ export function ReplayCanvas({
             className={marker.id === activeMarkerId ? "marker active" : "marker"}
             onClick={() => onSeekToMarker(marker)}
           >
-            <span>{marker.label}</span>
+            <span>{marker.evidence ? `${marker.label} (${marker.evidence})` : marker.label}</span>
             <span>{(marker.replayOffsetMs / 1000).toFixed(1)}s</span>
           </button>
         ))}

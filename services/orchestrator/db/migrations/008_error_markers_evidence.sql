@@ -1,0 +1,2 @@
+ALTER TABLE error_markers
+ADD COLUMN IF NOT EXISTS evidence TEXT NOT NULL DEFAULT '';
