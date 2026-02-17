@@ -47,12 +47,13 @@ function createDraft(cluster: IssueCluster): TriageDraft {
 
 export function IssueClustersPage() {
   const [lookbackHours, setLookbackHours] = useState(24);
+  const [issueStateFilter, setIssueStateFilter] = useState<"" | "active" | "open" | "acknowledged" | "resolved" | "muted">("active");
   const {
     data: clusters = [],
     isLoading,
     isFetching,
     isError,
-  } = useGetIssuesQuery();
+  } = useGetIssuesQuery(issueStateFilter);
   const { data: issueStats } = useGetIssueStatsQuery(lookbackHours);
   const [promoteIssues, { isLoading: isPromoting }] = usePromoteIssuesMutation();
   const [updateIssueState] = useUpdateIssueStateMutation();
@@ -152,6 +153,23 @@ export function IssueClustersPage() {
           <option value={24}>24h</option>
           <option value={72}>72h</option>
           <option value={168}>7d</option>
+        </select>
+        <label htmlFor="issue-state-filter-select">Issue State</label>
+        <select
+          id="issue-state-filter-select"
+          value={issueStateFilter}
+          onChange={(event) =>
+            setIssueStateFilter(
+              event.target.value as "" | "active" | "open" | "acknowledged" | "resolved" | "muted",
+            )
+          }
+        >
+          <option value="active">active</option>
+          <option value="">all</option>
+          <option value="open">open</option>
+          <option value="acknowledged">acknowledged</option>
+          <option value="resolved">resolved</option>
+          <option value="muted">muted</option>
         </select>
         <button type="button" onClick={handlePromote} disabled={isPromoting}>
           {isPromoting ? "Promoting..." : "Recompute Clusters"}

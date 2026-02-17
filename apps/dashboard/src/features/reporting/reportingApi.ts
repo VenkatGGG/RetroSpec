@@ -26,9 +26,12 @@ export const reportingApi = createApi({
   }),
   tagTypes: ["Issue", "Session"],
   endpoints: (builder) => ({
-    getIssues: builder.query<IssueCluster[], void>({
-      query: () => "/v1/issues",
-      transformResponse: (response: { issues: IssueCluster[] }) => response.issues,
+    getIssues: builder.query<IssueCluster[], string | void>({
+      query: (stateFilter) =>
+        stateFilter && stateFilter.trim().length > 0
+          ? `/v1/issues?state=${encodeURIComponent(stateFilter.trim())}`
+          : "/v1/issues",
+      transformResponse: (response: { issues: IssueCluster[]; state?: string }) => response.issues,
       providesTags: (result) =>
         result
           ? [

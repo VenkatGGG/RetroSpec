@@ -266,49 +266,72 @@ func (p *Postgres) PromoteClusters(ctx context.Context, projectID string, minSes
 	return result, nil
 }
 
-func (p *Postgres) ListIssueClusters(ctx context.Context, projectID string) ([]IssueCluster, error) {
+func (p *Postgres) ListIssueClusters(ctx context.Context, projectID string, stateFilter string) ([]IssueCluster, error) {
 	projectID = normalizeProjectID(projectID)
+	stateFilter = normalizeIssueStateFilter(stateFilter)
 
 	rows, err := p.pool.Query(
 		ctx,
-		`SELECT
-		   ic.project_id,
-		   ic.key,
-		   ic.symptom,
-		   ic.session_count,
-		   ic.user_count,
-		   ic.representative_session_id,
-		   ic.confidence,
-		   ic.last_seen_at,
-		   ic.created_at,
-		   CASE
-		     WHEN ics.state = 'muted'
-		      AND ics.muted_until IS NOT NULL
-		      AND ics.muted_until <= NOW()
-		       THEN 'open'
-		     WHEN ics.state = 'resolved'
-		      AND ics.updated_at IS NOT NULL
-		      AND ic.last_seen_at > ics.updated_at
-		       THEN 'open'
-		     ELSE COALESCE(ics.state, 'open')
-		   END AS state,
-		   COALESCE(ics.assignee, '') AS assignee,
-		   CASE
-		     WHEN ics.state = 'muted'
-		      AND ics.muted_until IS NOT NULL
-		      AND ics.muted_until > NOW()
-		       THEN ics.muted_until
-		     ELSE NULL
-		   END AS muted_until,
-		   COALESCE(ics.note, '') AS state_note,
-		   ics.updated_at AS state_updated_at
-		 FROM issue_clusters ic
-		 LEFT JOIN issue_cluster_states ics
-		   ON ics.project_id = ic.project_id
-		  AND ics.cluster_key = ic.key
-		 WHERE ic.project_id = $1
-		 ORDER BY ic.last_seen_at DESC`,
+		`WITH cluster_rows AS (
+		   SELECT
+		     ic.project_id,
+		     ic.key,
+		     ic.symptom,
+		     ic.session_count,
+		     ic.user_count,
+		     ic.representative_session_id,
+		     ic.confidence,
+		     ic.last_seen_at,
+		     ic.created_at,
+		     CASE
+		       WHEN ics.state = 'muted'
+		        AND ics.muted_until IS NOT NULL
+		        AND ics.muted_until <= NOW()
+		         THEN 'open'
+		       WHEN ics.state = 'resolved'
+		        AND ics.updated_at IS NOT NULL
+		        AND ic.last_seen_at > ics.updated_at
+		         THEN 'open'
+		       ELSE COALESCE(ics.state, 'open')
+		     END AS state,
+		     COALESCE(ics.assignee, '') AS assignee,
+		     CASE
+		       WHEN ics.state = 'muted'
+		        AND ics.muted_until IS NOT NULL
+		        AND ics.muted_until > NOW()
+		         THEN ics.muted_until
+		       ELSE NULL
+		     END AS muted_until,
+		     COALESCE(ics.note, '') AS state_note,
+		     ics.updated_at AS state_updated_at
+		   FROM issue_clusters ic
+		   LEFT JOIN issue_cluster_states ics
+		     ON ics.project_id = ic.project_id
+		    AND ics.cluster_key = ic.key
+		   WHERE ic.project_id = $1
+		 )
+		 SELECT
+		   project_id,
+		   key,
+		   symptom,
+		   session_count,
+		   user_count,
+		   representative_session_id,
+		   confidence,
+		   last_seen_at,
+		   created_at,
+		   state,
+		   assignee,
+		   muted_until,
+		   state_note,
+		   state_updated_at
+		 FROM cluster_rows
+		 WHERE $2::text = ''
+		    OR ($2::text = 'active' AND state IN ('open', 'acknowledged'))
+		    OR state = $2::text
+		 ORDER BY last_seen_at DESC`,
 		projectID,
+		stateFilter,
 	)
 	if err != nil {
 		return nil, err
@@ -1278,6 +1301,15 @@ func normalizeIssueState(state string) string {
 		return strings.TrimSpace(state)
 	default:
 		return "open"
+	}
+}
+
+func normalizeIssueStateFilter(state string) string {
+	switch strings.TrimSpace(state) {
+	case "", "open", "acknowledged", "resolved", "muted", "active":
+		return strings.TrimSpace(state)
+	default:
+		return ""
 	}
 }
 

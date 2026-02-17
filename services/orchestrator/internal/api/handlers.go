@@ -520,14 +520,28 @@ func (h *Handler) promoteIssues(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
+	stateFilter := strings.TrimSpace(r.URL.Query().Get("state"))
+	if stateFilter != "" &&
+		stateFilter != "open" &&
+		stateFilter != "acknowledged" &&
+		stateFilter != "resolved" &&
+		stateFilter != "muted" &&
+		stateFilter != "active" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "state must be one of: open, acknowledged, resolved, muted, active"})
+		return
+	}
+
 	projectID := h.projectIDFromContext(r.Context())
-	clusters, err := h.store.ListIssueClusters(r.Context(), projectID)
+	clusters, err := h.store.ListIssueClusters(r.Context(), projectID, stateFilter)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"issues": clusters})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"issues": clusters,
+		"state":  stateFilter,
+	})
 }
 
 func (h *Handler) updateIssueState(w http.ResponseWriter, r *http.Request) {
@@ -891,7 +905,7 @@ func (h *Handler) dispatchPromotedIssueAlerts(
 		if projectID != "" {
 			projectStateMap, ok := stateCache[projectID]
 			if !ok {
-				resolvedClusters, err := h.store.ListIssueClusters(ctx, projectID)
+				resolvedClusters, err := h.store.ListIssueClusters(ctx, projectID, "")
 				if err != nil {
 					errorsCount++
 					h.metrics.alertErrorsTotal.Add(1)
