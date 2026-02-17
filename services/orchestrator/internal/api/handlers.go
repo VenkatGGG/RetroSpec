@@ -882,9 +882,37 @@ func (h *Handler) dispatchPromotedIssueAlerts(
 		return 0, 0
 	}
 
+	stateCache := map[string]map[string]store.IssueCluster{}
 	sent := 0
 	errorsCount := 0
-	for _, cluster := range clusters {
+	for _, rawCluster := range clusters {
+		cluster := rawCluster
+		projectID := strings.TrimSpace(cluster.ProjectID)
+		if projectID != "" {
+			projectStateMap, ok := stateCache[projectID]
+			if !ok {
+				resolvedClusters, err := h.store.ListIssueClusters(ctx, projectID)
+				if err != nil {
+					errorsCount++
+					h.metrics.alertErrorsTotal.Add(1)
+					log.Printf("issue alert state lookup failed project=%s trigger=%s err=%v", projectID, trigger, err)
+					continue
+				}
+				projectStateMap = map[string]store.IssueCluster{}
+				for _, resolved := range resolvedClusters {
+					projectStateMap[resolved.Key] = resolved
+				}
+				stateCache[projectID] = projectStateMap
+			}
+			if resolved, ok := projectStateMap[cluster.Key]; ok {
+				cluster.State = resolved.State
+				cluster.Assignee = resolved.Assignee
+				cluster.MutedUntil = resolved.MutedUntil
+				cluster.StateNote = resolved.StateNote
+				cluster.StateUpdatedAt = resolved.StateUpdatedAt
+			}
+		}
+
 		delivered, err := h.alertNotifier.notifyClusterPromoted(ctx, cluster, trigger)
 		if err != nil {
 			errorsCount++

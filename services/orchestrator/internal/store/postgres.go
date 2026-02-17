@@ -277,9 +277,25 @@ func (p *Postgres) ListIssueClusters(ctx context.Context, projectID string) ([]I
 		   ic.confidence,
 		   ic.last_seen_at,
 		   ic.created_at,
-		   COALESCE(ics.state, 'open') AS state,
+		   CASE
+		     WHEN ics.state = 'muted'
+		      AND ics.muted_until IS NOT NULL
+		      AND ics.muted_until <= NOW()
+		       THEN 'open'
+		     WHEN ics.state = 'resolved'
+		      AND ics.updated_at IS NOT NULL
+		      AND ic.last_seen_at > ics.updated_at
+		       THEN 'open'
+		     ELSE COALESCE(ics.state, 'open')
+		   END AS state,
 		   COALESCE(ics.assignee, '') AS assignee,
-		   ics.muted_until,
+		   CASE
+		     WHEN ics.state = 'muted'
+		      AND ics.muted_until IS NOT NULL
+		      AND ics.muted_until > NOW()
+		       THEN ics.muted_until
+		     ELSE NULL
+		   END AS muted_until,
 		   COALESCE(ics.note, '') AS state_note,
 		   ics.updated_at AS state_updated_at
 		 FROM issue_clusters ic
