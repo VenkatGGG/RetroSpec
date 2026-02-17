@@ -56,10 +56,10 @@ export function SessionReplayPage() {
   }
 
   const requestSeek = (offsetMs: number) => {
-    setSeekRequest({
+    setSeekRequest((previous) => ({
       offsetMs: Math.max(0, offsetMs),
-      token: Date.now(),
-    });
+      token: (previous?.token ?? 0) + 1,
+    }));
   };
 
   const handleSeekToMarker = (marker: ErrorMarker) => {

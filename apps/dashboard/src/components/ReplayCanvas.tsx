@@ -61,15 +61,15 @@ export function ReplayCanvas({
     const mountPlayer = async () => {
       try {
         const module = await import("rrweb-player");
-        if (cancelled || !playerHostRef.current) {
+        if (cancelled) {
           return;
         }
 
         const RRWebPlayer = module.default as unknown as RRWebPlayerConstructor;
-        playerHostRef.current.innerHTML = "";
+        host.innerHTML = "";
 
         playerRef.current = new RRWebPlayer({
-          target: playerHostRef.current,
+          target: host,
           props: {
             autoPlay: false,
             events,
@@ -90,9 +90,7 @@ export function ReplayCanvas({
 
     return () => {
       cancelled = true;
-      if (playerHostRef.current) {
-        playerHostRef.current.innerHTML = "";
-      }
+      host.innerHTML = "";
       playerRef.current = null;
     };
   }, [events]);
