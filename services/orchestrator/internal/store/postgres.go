@@ -736,10 +736,14 @@ func (p *Postgres) UpsertSessionArtifact(
 	projectID = normalizeProjectID(projectID)
 	sessionID = strings.TrimSpace(sessionID)
 	artifactKey = strings.TrimSpace(artifactKey)
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = "ready"
+	}
 	if sessionID == "" {
 		return SessionArtifact{}, fmt.Errorf("sessionID is required")
 	}
-	if artifactKey == "" {
+	if artifactKey == "" && status == "ready" {
 		return SessionArtifact{}, fmt.Errorf("artifactKey is required")
 	}
 
@@ -753,10 +757,6 @@ func (p *Postgres) UpsertSessionArtifact(
 		triggerKind = "ui_no_effect"
 	}
 
-	status = strings.TrimSpace(status)
-	if status == "" {
-		status = "ready"
-	}
 	if generatedAt.IsZero() {
 		generatedAt = time.Now().UTC()
 	}

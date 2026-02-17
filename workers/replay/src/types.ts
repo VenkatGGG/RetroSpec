@@ -18,6 +18,8 @@ export interface ReplayResult {
   markerWindows: MarkerWindow[];
   generatedAt: string;
   videoArtifactKey?: string;
+  videoStatus: "ready" | "failed" | "skipped";
+  videoError?: string;
 }
 
 export interface ReplayArtifactReport {

@@ -54,6 +54,7 @@ Set `ARTIFACT_TOKEN_SECRET` to enable short-lived signed artifact playback token
 Set `REPLAY_RENDER_ENABLED=true` on the replay worker to render full-session `.webm` assets via Playwright.
 Replay worker retries failed jobs automatically (`REPLAY_MAX_ATTEMPTS`, `REPLAY_RETRY_BASE_MS`) before dead-lettering.
 Replay worker deduplicates repeated payloads for a TTL window (`REPLAY_DEDUPE_WINDOW_SEC`).
+When video rendering fails, the worker still reports `analysis_json` and records a `replay_video` artifact with `failed` status.
 API rate limiting is configurable with `RATE_LIMIT_REQUESTS_PER_SEC` and `RATE_LIMIT_BURST`.
 The orchestrator exposes Prometheus-style counters at `GET /metrics`.
 Optional background maintenance loops can be enabled with `AUTO_CLEANUP_INTERVAL_MINUTES` and `AUTO_PROMOTE_INTERVAL_MINUTES`.

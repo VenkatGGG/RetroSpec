@@ -286,8 +286,16 @@ func (h *Handler) reportReplayResult(w http.ResponseWriter, r *http.Request) {
 	projectID := strings.TrimSpace(payload.ProjectID)
 	sessionID := strings.TrimSpace(payload.SessionID)
 	artifactKey := strings.TrimSpace(payload.ArtifactKey)
-	if projectID == "" || sessionID == "" || artifactKey == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "projectId, sessionId, and artifactKey are required"})
+	status := strings.TrimSpace(payload.Status)
+	if status == "" {
+		status = "ready"
+	}
+	if projectID == "" || sessionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "projectId and sessionId are required"})
+		return
+	}
+	if artifactKey == "" && status == "ready" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "artifactKey is required for ready artifacts"})
 		return
 	}
 
@@ -313,7 +321,7 @@ func (h *Handler) reportReplayResult(w http.ResponseWriter, r *http.Request) {
 		sessionID,
 		artifactKey,
 		payload.TriggerKind,
-		payload.Status,
+		status,
 		payload.Windows,
 		generatedAt,
 	)

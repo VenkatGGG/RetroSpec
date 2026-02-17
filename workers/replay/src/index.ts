@@ -101,11 +101,11 @@ async function workerLoop() {
         triggerKind: parsed.triggerKind,
         artifactType: "analysis_json",
         artifactKey: result.artifactKey,
-        status: "ready",
+        status: result.videoStatus === "failed" ? "failed" : "ready",
         generatedAt: result.generatedAt,
         windows: result.markerWindows,
       });
-      if (result.videoArtifactKey) {
+      if (result.videoStatus === "ready" && result.videoArtifactKey) {
         await reportReplayArtifact(config, {
           projectId: parsed.projectId,
           sessionId: result.sessionId,
@@ -116,11 +116,22 @@ async function workerLoop() {
           generatedAt: result.generatedAt,
           windows: result.markerWindows,
         });
+      } else if (result.videoStatus === "failed") {
+        await reportReplayArtifact(config, {
+          projectId: parsed.projectId,
+          sessionId: result.sessionId,
+          triggerKind: parsed.triggerKind,
+          artifactType: "replay_video",
+          artifactKey: "",
+          status: "failed",
+          generatedAt: result.generatedAt,
+          windows: result.markerWindows,
+        });
       }
       await redis.set(doneKey, result.generatedAt, "EX", Math.max(60, config.dedupeWindowSec));
 
       console.info(
-        `[replay-worker] processed session=${result.sessionId} project=${parsed.projectId} analysis=${result.artifactKey} video=${result.videoArtifactKey ?? "none"}`,
+        `[replay-worker] processed session=${result.sessionId} project=${parsed.projectId} analysis=${result.artifactKey} videoStatus=${result.videoStatus} video=${result.videoArtifactKey ?? "none"}`,
       );
     } catch (error) {
       const details = error instanceof Error ? error.message : String(error);

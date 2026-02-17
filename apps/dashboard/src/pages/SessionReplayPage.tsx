@@ -29,20 +29,15 @@ export function SessionReplayPage() {
     error: eventsError,
   } = useGetSessionEventsQuery(sessionId ?? "", { skip: !sessionId });
   const replayVideoArtifact =
-    activeSession?.artifacts.find(
-      (artifact) => artifact.artifactType === "replay_video" && artifact.status === "ready",
-    ) ?? null;
+    activeSession?.artifacts.find((artifact) => artifact.artifactType === "replay_video") ?? null;
   const {
     data: replayVideoToken,
     isFetching: isReplayTokenFetching,
     isError: isReplayTokenError,
   } = useGetSessionArtifactTokenQuery(
+    { sessionId: activeSession?.id ?? "", artifactType: "replay_video" },
     {
-      sessionId: activeSession?.id ?? "",
-      artifactType: "replay_video",
-    },
-    {
-      skip: !replayVideoArtifact,
+      skip: !replayVideoArtifact || replayVideoArtifact.status !== "ready",
     },
   );
 
@@ -72,7 +67,7 @@ export function SessionReplayPage() {
     activeSession.artifacts.find((artifact) => artifact.artifactType === "analysis_json") ??
     activeSession.artifacts?.[0] ??
     null;
-  const replayVideoSource = replayVideoArtifact && replayVideoToken?.token
+  const replayVideoSource = replayVideoArtifact?.status === "ready" && replayVideoToken?.token
     ? `${apiBaseUrl}/v1/sessions/${activeSession.id}/artifacts/replay_video?artifactToken=${encodeURIComponent(replayVideoToken.token)}`
     : "";
 
@@ -136,17 +131,24 @@ export function SessionReplayPage() {
             <strong>Status:</strong> {replayVideoArtifact.status} | <strong>Key:</strong>{" "}
             <code>{replayVideoArtifact.artifactKey}</code>
           </p>
-          {isReplayTokenFetching && <p className="replay-status">Preparing secure playback...</p>}
-          {isReplayTokenError && (
+          {replayVideoArtifact.status !== "ready" && (
+            <p className="replay-status error">Video render failed for this session. Inspect analysis.json for details.</p>
+          )}
+          {replayVideoArtifact.status === "ready" && isReplayTokenFetching && (
+            <p className="replay-status">Preparing secure playback...</p>
+          )}
+          {replayVideoArtifact.status === "ready" && isReplayTokenError && (
             <p className="replay-status error">Unable to create playback token for this artifact.</p>
           )}
-          <video
-            className="replay-video"
-            src={replayVideoSource}
-            controls
-            preload="metadata"
-            playsInline
-          />
+          {replayVideoArtifact.status === "ready" && (
+            <video
+              className="replay-video"
+              src={replayVideoSource}
+              controls
+              preload="metadata"
+              playsInline
+            />
+          )}
         </article>
       )}
 

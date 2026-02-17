@@ -26,7 +26,7 @@ export async function processReplayJob(data: ReplayJobData): Promise<ReplayResul
   const replayEvents = rrwebPayloadSchema.parse(eventsBlob);
   const generatedAt = new Date().toISOString();
   let videoArtifactKey = "";
-  let renderStatus = "skipped";
+  let renderStatus: "ready" | "failed" | "skipped" = "skipped";
   let renderError = "";
 
   if (config.renderEnabled) {
@@ -63,5 +63,7 @@ export async function processReplayJob(data: ReplayJobData): Promise<ReplayResul
     markerWindows: artifact.markerWindows,
     generatedAt,
     videoArtifactKey: videoArtifactKey || undefined,
+    videoStatus: renderStatus,
+    videoError: renderError || undefined,
   };
 }
