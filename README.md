@@ -74,6 +74,7 @@ Optional background maintenance loops can be enabled with `AUTO_CLEANUP_INTERVAL
 Ingest can auto-promote clusters immediately (`AUTO_PROMOTE_ON_INGEST=true`) so repeated issues appear without waiting for scheduled/manual promotion.
 Issue trend stats are available at `GET /v1/issues/stats?hours=24`.
 Session-level AI report cards are available on `GET /v1/sessions/{sessionID}` under `reportCard`.
+Report cards use statuses: `pending`, `ready`, `failed`, and `discarded` (low-confidence filtered).
 
 ## Website Integration (SDK)
 
