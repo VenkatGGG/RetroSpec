@@ -71,6 +71,7 @@ func main() {
 		cfg.InternalAPIKey,
 		cfg.IngestAPIKey,
 		cfg.ClusterPromoteMinSessions,
+		cfg.AutoPromoteOnIngest,
 		cfg.RateLimitRequestsPerSec,
 		cfg.RateLimitBurst,
 		cfg.ArtifactTokenSecret,

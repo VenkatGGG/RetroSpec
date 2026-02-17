@@ -30,6 +30,7 @@ type Handler struct {
 	ingestAPIKey             string
 	store                    *store.Postgres
 	clusterPromoteMinSession int
+	autoPromoteOnIngest      bool
 	rateLimiter              *apiRateLimiter
 	metrics                  *apiMetrics
 	artifactTokenSecret      string
@@ -54,6 +55,7 @@ func NewHandler(
 	internalAPIKey string,
 	ingestAPIKey string,
 	clusterPromoteMinSession int,
+	autoPromoteOnIngest bool,
 	rateLimitRequestsPerSec float64,
 	rateLimitBurst int,
 	artifactTokenSecret string,
@@ -71,6 +73,7 @@ func NewHandler(
 		internalAPIKey:           internalAPIKey,
 		ingestAPIKey:             ingestAPIKey,
 		clusterPromoteMinSession: clusterPromoteMinSession,
+		autoPromoteOnIngest:      autoPromoteOnIngest,
 		rateLimiter: newAPIRateLimiter(rateLimitRequestsPerSec, rateLimitBurst, func() {
 			metrics.rateLimitedTotal.Add(1)
 		}),
@@ -188,11 +191,24 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.metrics.ingestSessionsTotal.Add(1)
+	promotedCount := 0
+	promoteError := ""
+	if h.autoPromoteOnIngest {
+		promoted, err := h.store.PromoteClusters(r.Context(), stored.ProjectID, h.clusterPromoteMinSession)
+		if err != nil {
+			promoteError = err.Error()
+			log.Printf("auto-promote on ingest failed session=%s project=%s err=%v", stored.ID, stored.ProjectID, err)
+		} else {
+			promotedCount = len(promoted.Promoted)
+		}
+	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"session":            stored,
 		"queueError":         queueError,
 		"analysisQueueError": analysisQueueError,
+		"promotedCount":      promotedCount,
+		"promoteError":       promoteError,
 	})
 }
 

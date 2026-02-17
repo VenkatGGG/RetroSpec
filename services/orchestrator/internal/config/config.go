@@ -22,6 +22,7 @@ type Config struct {
 	RateLimitBurst             int
 	AutoCleanupIntervalMinutes int
 	AutoPromoteIntervalMinutes int
+	AutoPromoteOnIngest        bool
 	SessionRetentionDays       int
 	S3Region                   string
 	S3Endpoint                 string
@@ -50,6 +51,7 @@ func Load() Config {
 		RateLimitBurst:             envOrDefaultInt("RATE_LIMIT_BURST", 50),
 		AutoCleanupIntervalMinutes: envOrDefaultInt("AUTO_CLEANUP_INTERVAL_MINUTES", 0),
 		AutoPromoteIntervalMinutes: envOrDefaultInt("AUTO_PROMOTE_INTERVAL_MINUTES", 0),
+		AutoPromoteOnIngest:        envOrDefaultBool("AUTO_PROMOTE_ON_INGEST", true),
 		SessionRetentionDays:       envOrDefaultInt("SESSION_RETENTION_DAYS", 7),
 		S3Region:                   envOrDefault("S3_REGION", "us-east-1"),
 		S3Endpoint:                 os.Getenv("S3_ENDPOINT"),
@@ -138,4 +140,20 @@ func envOrDefaultFloat(key string, fallback float64) float64 {
 		return fallback
 	}
 	return parsed
+}
+
+func envOrDefaultBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+
+	switch value {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }
