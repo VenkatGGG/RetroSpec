@@ -10,6 +10,13 @@ interface RemotePathResponse {
   confidence?: number;
 }
 
+interface RRWebEventLike {
+  timestamp?: unknown;
+}
+
+const MAX_REMOTE_EVENTS = 180;
+const MAX_REMOTE_PAYLOAD_CHARS = 45_000;
+
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
@@ -30,7 +37,54 @@ function toStringIfNonEmpty(value: unknown): string {
   return value.trim();
 }
 
-function summarizeEvents(rawEvents: unknown): {
+function selectEventsNearMarkers(
+  rawEvents: unknown[],
+  markerOffsetsMs: number[],
+): unknown[] {
+  if (rawEvents.length === 0 || markerOffsetsMs.length === 0) {
+    return rawEvents.slice(0, MAX_REMOTE_EVENTS);
+  }
+
+  const typedEvents = rawEvents as RRWebEventLike[];
+  const firstTimestamp =
+    typeof typedEvents[0]?.timestamp === "number" ? (typedEvents[0].timestamp as number) : 0;
+  const windows = markerOffsetsMs.map((offset) => ({
+    start: Math.max(0, firstTimestamp + offset - 3_000),
+    end: firstTimestamp + offset + 3_000,
+  }));
+
+  const selected: unknown[] = [];
+  for (const event of typedEvents) {
+    if (selected.length >= MAX_REMOTE_EVENTS) {
+      break;
+    }
+    if (typeof event.timestamp !== "number") {
+      continue;
+    }
+    const ts = event.timestamp;
+    const inWindow = windows.some((window) => ts >= window.start && ts <= window.end);
+    if (inWindow) {
+      selected.push(event);
+    }
+  }
+
+  if (selected.length > 0) {
+    return selected;
+  }
+  return rawEvents.slice(0, MAX_REMOTE_EVENTS);
+}
+
+function redactSensitiveValues(input: string): string {
+  return input
+    .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, "<email>")
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "<uuid>")
+    .replace(/\b\d{12,19}\b/g, "<long-number>")
+    .replace(/\b(?:\d[ -]*?){13,16}\b/g, "<card-number>")
+    .replace(/\b(?:access|api|auth|secret|token|password|passwd)[^,\s]{0,40}/gi, "<credential>")
+    .replace(/https?:\/\/[^\s"']+/gi, "<url>");
+}
+
+function summarizeEvents(rawEvents: unknown, markerOffsetsMs: number[]): {
   eventCount: number;
   sampledPayload: string;
 } {
@@ -42,10 +96,10 @@ function summarizeEvents(rawEvents: unknown): {
   }
 
   const eventCount = rawEvents.length;
-  const sampled = rawEvents.slice(0, 120);
+  const sampled = selectEventsNearMarkers(rawEvents, markerOffsetsMs);
   let payload = "";
   try {
-    payload = JSON.stringify(sampled).slice(0, 40_000);
+    payload = redactSensitiveValues(JSON.stringify(sampled)).slice(0, MAX_REMOTE_PAYLOAD_CHARS);
   } catch {
     payload = "";
   }
@@ -97,7 +151,7 @@ async function postModelRequest(
     throw new Error(`${mode} model endpoint is not configured`);
   }
 
-  const { eventCount, sampledPayload } = summarizeEvents(rawEvents);
+  const { eventCount, sampledPayload } = summarizeEvents(rawEvents, job.markerOffsetsMs);
   const controller = new AbortController();
   const timeout = setTimeout(() => {
     controller.abort();

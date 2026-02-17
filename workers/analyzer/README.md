@@ -8,6 +8,7 @@ Async worker that consumes `analysis-jobs` from Redis and writes per-session rep
 - Supports provider modes:
   - `heuristic`: deterministic report generation.
   - `dual_http`: calls separate text and visual model endpoints and merges both paths.
+- Remote model payloads are sampled around marker windows and redacted for common sensitive tokens.
 - Reports `pending -> ready/failed` status via `POST /v1/internal/analysis-reports`.
 - Retries failed jobs with exponential backoff and dead-letters exhausted payloads.
 
