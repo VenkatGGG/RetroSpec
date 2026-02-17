@@ -1,0 +1,16 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: retrospec-default
+  group_by: ["alertname", "service", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 1h
+
+receivers:
+  - name: retrospec-default
+    # Replace this with your on-call endpoint (PagerDuty, Slack webhook bridge, etc).
+    webhook_configs:
+      - url: http://host.docker.internal:5001/alerts
+        send_resolved: true

@@ -1,0 +1,94 @@
+groups:
+  - name: retrospec.queue
+    rules:
+      - alert: RetroSpecReplayQueueDeadLetterNonZero
+        expr: retrospec_replay_queue_failed_depth > 0
+        for: 2m
+        labels:
+          severity: critical
+          service: retrospec
+        annotations:
+          summary: Replay queue dead-letter depth is non-zero.
+          description: Replay worker dead-letter queue has messages for more than 2 minutes.
+
+      - alert: RetroSpecAnalysisQueueDeadLetterNonZero
+        expr: retrospec_analysis_queue_failed_depth > 0
+        for: 2m
+        labels:
+          severity: critical
+          service: retrospec
+        annotations:
+          summary: Analysis queue dead-letter depth is non-zero.
+          description: Analyzer dead-letter queue has messages for more than 2 minutes.
+
+      - alert: RetroSpecReplayQueuePendingHigh
+        expr: retrospec_replay_queue_pending_total >= 50
+        for: 10m
+        labels:
+          severity: warning
+          service: retrospec
+        annotations:
+          summary: Replay pending queue depth is high.
+          description: Replay queue pending entries exceeded 50 for 10 minutes.
+
+      - alert: RetroSpecAnalysisQueuePendingHigh
+        expr: retrospec_analysis_queue_pending_total >= 50
+        for: 10m
+        labels:
+          severity: warning
+          service: retrospec
+        annotations:
+          summary: Analysis pending queue depth is high.
+          description: Analysis queue pending entries exceeded 50 for 10 minutes.
+
+      - alert: RetroSpecQueueMetricsCollectionErrors
+        expr: increase(retrospec_queue_metrics_errors_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: retrospec
+        annotations:
+          summary: Queue telemetry collection errors detected.
+          description: Orchestrator queue metric snapshots are failing; Redis visibility is degraded.
+
+  - name: retrospec.pipeline
+    rules:
+      - alert: RetroSpecIngestWithoutReplayProgress
+        expr: increase(retrospec_ingest_sessions_total[15m]) >= 20 and increase(retrospec_replay_artifacts_total[15m]) == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: retrospec
+        annotations:
+          summary: Ingest is active but replay pipeline has stalled.
+          description: Sessions are being ingested but no replay artifacts were reported in the last 15 minutes.
+
+      - alert: RetroSpecIngestWithoutAnalysisProgress
+        expr: increase(retrospec_ingest_sessions_total[15m]) >= 20 and increase(retrospec_analysis_reports_total[15m]) == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: retrospec
+        annotations:
+          summary: Ingest is active but analysis pipeline has stalled.
+          description: Sessions are being ingested but no analysis reports were written in the last 15 minutes.
+
+      - alert: RetroSpecReplayEnqueueErrors
+        expr: increase(retrospec_replay_queue_errors_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: retrospec
+        annotations:
+          summary: Replay enqueue errors detected.
+          description: Replay enqueue errors occurred in the last 5 minutes.
+
+      - alert: RetroSpecAnalysisEnqueueErrors
+        expr: increase(retrospec_analysis_queue_errors_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: retrospec
+        annotations:
+          summary: Analysis enqueue errors detected.
+          description: Analysis enqueue errors occurred in the last 5 minutes.
