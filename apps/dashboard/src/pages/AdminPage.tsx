@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   useCreateProjectKeyMutation,
   useCreateProjectMutation,
+  useGetQueueDeadLettersQuery,
   useGetQueueHealthQuery,
   useListProjectKeysQuery,
   useListProjectsQuery,
@@ -15,6 +16,8 @@ export function AdminPage() {
   const [label, setLabel] = useState("default-key");
   const [projectId, setProjectId] = useState("");
   const [newKeyLabel, setNewKeyLabel] = useState("rotation-key");
+  const [deadLetterQueue, setDeadLetterQueue] = useState<"replay" | "analysis">("replay");
+  const [deadLetterLimit, setDeadLetterLimit] = useState("20");
   const [redriveLimit, setRedriveLimit] = useState("25");
   const [resultMessage, setResultMessage] = useState("");
 
@@ -27,6 +30,26 @@ export function AdminPage() {
     isError: isQueueHealthError,
     refetch: refetchQueueHealth,
   } = useGetQueueHealthQuery(undefined, { pollingInterval: 15000 });
+  const parsedDeadLetterLimit = Number.parseInt(deadLetterLimit, 10);
+  const normalizedDeadLetterLimit =
+    Number.isFinite(parsedDeadLetterLimit) && parsedDeadLetterLimit > 0
+      ? Math.min(200, parsedDeadLetterLimit)
+      : 20;
+  const {
+    data: deadLetters,
+    isLoading: isDeadLettersLoading,
+    isFetching: isDeadLettersFetching,
+    isError: isDeadLettersError,
+    refetch: refetchDeadLetters,
+  } = useGetQueueDeadLettersQuery(
+    {
+      queue: deadLetterQueue,
+      limit: normalizedDeadLetterLimit,
+    },
+    {
+      pollingInterval: 15000,
+    },
+  );
   const [createProject, { isLoading: isCreatingProject }] = useCreateProjectMutation();
   const [createProjectKey, { isLoading: isCreatingKey }] = useCreateProjectKeyMutation();
   const [redriveQueueDeadLetters, { isLoading: isRedrivingQueue }] =
@@ -68,6 +91,7 @@ export function AdminPage() {
         `Re-drive ${response.result.queueKind}: moved ${response.result.redriven}, skipped ${response.result.skipped}, remaining dead-letter ${response.result.remainingFailed}.`,
       );
       void refetchQueueHealth();
+      void refetchDeadLetters();
     } catch {
       setResultMessage("Queue re-drive failed. Verify admin auth and Redis connectivity.");
     }
@@ -149,6 +173,69 @@ export function AdminPage() {
                 <p>Dead-letter: {queueHealth.analysis.failedDepth}</p>
               </div>
             </div>
+            <div className="dead-letter-controls">
+              <label htmlFor="dead-letter-queue-kind">Dead-letter queue</label>
+              <select
+                id="dead-letter-queue-kind"
+                value={deadLetterQueue}
+                onChange={(event) =>
+                  setDeadLetterQueue(event.target.value === "analysis" ? "analysis" : "replay")
+                }
+              >
+                <option value="replay">Replay</option>
+                <option value="analysis">Analysis</option>
+              </select>
+              <label htmlFor="dead-letter-limit">Rows</label>
+              <input
+                id="dead-letter-limit"
+                type="number"
+                min={1}
+                max={200}
+                value={deadLetterLimit}
+                onChange={(event) => setDeadLetterLimit(event.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => void refetchDeadLetters()}
+                disabled={isDeadLettersFetching}
+              >
+                {isDeadLettersFetching ? "Refreshing..." : "Refresh dead-letter"}
+              </button>
+            </div>
+            {isDeadLettersLoading && <p>Loading dead-letter entries...</p>}
+            {isDeadLettersError && <p>Dead-letter entries unavailable. Verify admin auth and Redis.</p>}
+            {deadLetters && (
+              <div className="dead-letter-list">
+                <p>
+                  Showing {deadLetters.entries.length} of {deadLetters.total} dead-letter entries
+                  for <strong>{deadLetters.queueKind}</strong> queue. Unparsable backlog:{" "}
+                  {deadLetters.unparsable}.
+                </p>
+                {deadLetters.entries.length === 0 && (
+                  <p className="replay-status">No dead-letter entries for this queue.</p>
+                )}
+                {deadLetters.entries.map((entry, index) => (
+                  <article
+                    key={`${entry.sessionId || "unknown"}:${entry.failedAt || "na"}:${index}`}
+                    className="dead-letter-entry"
+                  >
+                    <p>
+                      <strong>Session:</strong> {entry.sessionId || "unknown"} |{" "}
+                      <strong>Project:</strong> {entry.projectId || "unknown"} |{" "}
+                      <strong>Attempt:</strong> {entry.attempt || 0}
+                    </p>
+                    <p>
+                      <strong>Trigger:</strong> {entry.triggerKind || "unknown"} |{" "}
+                      <strong>Failed At:</strong>{" "}
+                      {entry.failedAt ? new Date(entry.failedAt).toLocaleString() : "unknown"}
+                    </p>
+                    <p>
+                      <strong>Error:</strong> {entry.error || "unknown"}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>

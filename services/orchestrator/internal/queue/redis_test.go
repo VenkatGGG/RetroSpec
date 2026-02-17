@@ -298,6 +298,65 @@ func TestRedisProducerRedriveDeadLettersSkipsUnprocessable(t *testing.T) {
 	}
 }
 
+func TestRedisProducerListDeadLetters(t *testing.T) {
+	mr := miniredis.RunT(t)
+	ctx := context.Background()
+	replayQueue := "replay-jobs"
+	analysisQueue := "analysis-jobs"
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
+
+	producer, err := NewRedisProducer(mr.Addr(), replayQueue, analysisQueue)
+	if err != nil {
+		t.Fatalf("new producer failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = producer.Close()
+	})
+
+	oldPayload := `{"projectId":"proj_test","sessionId":"session-old","eventsObjectKey":"events/old.json","markerOffsetsMs":[1200],"triggerKind":"js_exception","attempt":3}`
+	newPayload := `{"projectId":"proj_test","sessionId":"session-new","eventsObjectKey":"events/new.json","markerOffsetsMs":[2400],"triggerKind":"api_error","attempt":3,"route":"/checkout","site":"shop.example.com"}`
+	oldEntry, err := marshalFailedEntry(oldPayload, "old failed")
+	if err != nil {
+		t.Fatalf("marshal old failed entry: %v", err)
+	}
+	newEntry, err := marshalFailedEntry(newPayload, "new failed")
+	if err != nil {
+		t.Fatalf("marshal new failed entry: %v", err)
+	}
+	if err := client.LPush(ctx, replayQueue+":failed", oldEntry).Err(); err != nil {
+		t.Fatalf("seed old replay failed entry: %v", err)
+	}
+	if err := client.LPush(ctx, replayQueue+":failed", newEntry).Err(); err != nil {
+		t.Fatalf("seed new replay failed entry: %v", err)
+	}
+	if err := client.LPush(ctx, replayQueue+":failed:unprocessable", "bad-entry").Err(); err != nil {
+		t.Fatalf("seed unparsable replay entry: %v", err)
+	}
+
+	result, err := producer.ListDeadLetters(ctx, DeadLetterQueueReplay, 10)
+	if err != nil {
+		t.Fatalf("list dead-letters failed: %v", err)
+	}
+
+	if result.QueueKind != DeadLetterQueueReplay || result.Limit != 10 || result.Total != 2 || result.Unparsable != 1 {
+		t.Fatalf("unexpected list result summary: %+v", result)
+	}
+	if len(result.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(result.Entries))
+	}
+	// LRange returns newest entry first when workers use LPUSH for dead-letter writes.
+	if result.Entries[0].SessionID != "session-new" || result.Entries[0].TriggerKind != "api_error" {
+		t.Fatalf("unexpected newest entry metadata: %+v", result.Entries[0])
+	}
+	if result.Entries[1].SessionID != "session-old" || result.Entries[1].TriggerKind != "js_exception" {
+		t.Fatalf("unexpected second entry metadata: %+v", result.Entries[1])
+	}
+}
+
 func marshalFailedEntry(payload string, details string) (string, error) {
 	entry := map[string]any{
 		"failedAt": "2026-01-01T00:00:00Z",

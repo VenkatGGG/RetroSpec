@@ -47,6 +47,27 @@ type DeadLetterRedriveResult struct {
 	RemainingFailed int64               `json:"remainingFailed"`
 }
 
+type DeadLetterEntry struct {
+	FailedAt    string `json:"failedAt"`
+	Error       string `json:"error"`
+	Attempt     int    `json:"attempt"`
+	ProjectID   string `json:"projectId"`
+	SessionID   string `json:"sessionId"`
+	TriggerKind string `json:"triggerKind"`
+	Route       string `json:"route"`
+	Site        string `json:"site"`
+	Payload     string `json:"payload"`
+	Raw         string `json:"raw"`
+}
+
+type DeadLetterListResult struct {
+	QueueKind  DeadLetterQueueKind `json:"queueKind"`
+	Limit      int                 `json:"limit"`
+	Total      int64               `json:"total"`
+	Entries    []DeadLetterEntry   `json:"entries"`
+	Unparsable int64               `json:"unparsable"`
+}
+
 type Producer interface {
 	EnqueueReplayJob(ctx context.Context, job ReplayJob) error
 	EnqueueAnalysisJob(ctx context.Context, job AnalysisJob) error
@@ -59,6 +80,10 @@ type StatsProvider interface {
 
 type DeadLetterRedriver interface {
 	RedriveDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, limit int) (DeadLetterRedriveResult, error)
+}
+
+type DeadLetterInspector interface {
+	ListDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, limit int) (DeadLetterListResult, error)
 }
 
 type NoopProducer struct{}
@@ -87,5 +112,12 @@ func (p *NoopProducer) RedriveDeadLetters(_ context.Context, queueKind DeadLette
 	return DeadLetterRedriveResult{
 		QueueKind: queueKind,
 		Requested: limit,
+	}, nil
+}
+
+func (p *NoopProducer) ListDeadLetters(_ context.Context, queueKind DeadLetterQueueKind, limit int) (DeadLetterListResult, error) {
+	return DeadLetterListResult{
+		QueueKind: queueKind,
+		Limit:     limit,
 	}, nil
 }

@@ -26,6 +26,7 @@ type Handler struct {
 	replayProducer           queue.Producer
 	queueStatsProvider       queue.StatsProvider
 	queueRedriver            queue.DeadLetterRedriver
+	queueDeadLetterInspector queue.DeadLetterInspector
 	corsAllowedOrigins       []string
 	adminAPIKey              string
 	internalAPIKey           string
@@ -87,6 +88,10 @@ func NewHandler(
 	if provider, ok := replayProducer.(queue.DeadLetterRedriver); ok {
 		queueRedriver = provider
 	}
+	var queueDeadLetterInspector queue.DeadLetterInspector
+	if provider, ok := replayProducer.(queue.DeadLetterInspector); ok {
+		queueDeadLetterInspector = provider
+	}
 
 	metrics := newAPIMetrics(queueStatsProvider)
 
@@ -95,6 +100,7 @@ func NewHandler(
 		replayProducer:           replayProducer,
 		queueStatsProvider:       queueStatsProvider,
 		queueRedriver:            queueRedriver,
+		queueDeadLetterInspector: queueDeadLetterInspector,
 		artifactStore:            artifactStore,
 		corsAllowedOrigins:       corsAllowedOrigins,
 		adminAPIKey:              adminAPIKey,
@@ -146,6 +152,7 @@ func (h *Handler) Router() http.Handler {
 			r.With(h.requireAdminAccess).Get("/projects/{projectID}/keys", h.listProjectAPIKeys)
 			r.With(h.requireAdminAccess).Post("/projects/{projectID}/keys", h.createProjectAPIKey)
 			r.With(h.requireAdminAccess).Get("/queue-health", h.getQueueHealth)
+			r.With(h.requireAdminAccess).Get("/queue-dead-letters", h.getQueueDeadLetters)
 			r.With(h.requireAdminAccess).Post("/queue-redrive", h.redriveDeadLetters)
 		})
 		r.With(h.requireInternalAccess).Post("/internal/replay-results", h.reportReplayResult)
@@ -486,6 +493,49 @@ func (h *Handler) getQueueHealth(w http.ResponseWriter, r *http.Request) {
 			"criticalRetry":   criticalRetry,
 			"criticalFailed":  criticalFailed,
 		},
+	})
+}
+
+func (h *Handler) getQueueDeadLetters(w http.ResponseWriter, r *http.Request) {
+	if h.queueDeadLetterInspector == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue dead-letter inspector unavailable"})
+		return
+	}
+
+	queueKind, ok := parseDeadLetterQueueKind(r.URL.Query().Get("queue"))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "queue query must be replay or analysis"})
+		return
+	}
+
+	limit := 25
+	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
+		parsedLimit, err := strconv.Atoi(value)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be an integer"})
+			return
+		}
+		limit = parsedLimit
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	result, err := h.queueDeadLetterInspector.ListDeadLetters(ctx, queueKind, limit)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "dead-letter lookup failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"result":      result,
+		"generatedAt": time.Now().UTC().Format(time.RFC3339),
 	})
 }
 

@@ -185,6 +185,63 @@ func (p *RedisProducer) RedriveDeadLetters(ctx context.Context, queueKind DeadLe
 	return result, nil
 }
 
+func (p *RedisProducer) ListDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, limit int) (DeadLetterListResult, error) {
+	if err := p.ensureStreamQueues(ctx); err != nil {
+		return DeadLetterListResult{}, err
+	}
+
+	queueName, err := p.deadLetterQueueName(queueKind)
+	if err != nil {
+		return DeadLetterListResult{}, err
+	}
+
+	normalizedLimit := limit
+	if normalizedLimit < 1 {
+		normalizedLimit = 25
+	}
+	if normalizedLimit > 200 {
+		normalizedLimit = 200
+	}
+
+	failedKey := queueName + ":failed"
+	rows, err := p.client.LRange(ctx, failedKey, 0, int64(normalizedLimit-1)).Result()
+	if err != nil && err != redis.Nil {
+		return DeadLetterListResult{}, fmt.Errorf("list dead-letter entries: %w", err)
+	}
+	if errors.Is(err, redis.Nil) {
+		rows = []string{}
+	}
+
+	total, err := p.client.LLen(ctx, failedKey).Result()
+	if err != nil && err != redis.Nil {
+		return DeadLetterListResult{}, fmt.Errorf("dead-letter depth: %w", err)
+	}
+	if errors.Is(err, redis.Nil) {
+		total = 0
+	}
+
+	unparsable, err := p.client.LLen(ctx, failedKey+":unprocessable").Result()
+	if err != nil && err != redis.Nil {
+		return DeadLetterListResult{}, fmt.Errorf("dead-letter unparsable depth: %w", err)
+	}
+	if errors.Is(err, redis.Nil) {
+		unparsable = 0
+	}
+
+	entries := make([]DeadLetterEntry, 0, len(rows))
+	for _, raw := range rows {
+		entries = append(entries, parseDeadLetterEntry(raw))
+	}
+
+	return DeadLetterListResult{
+		QueueKind:  queueKind,
+		Limit:      normalizedLimit,
+		Total:      total,
+		Entries:    entries,
+		Unparsable: unparsable,
+	}, nil
+}
+
 func (p *RedisProducer) deadLetterQueueName(queueKind DeadLetterQueueKind) (string, error) {
 	switch queueKind {
 	case DeadLetterQueueReplay:
@@ -222,6 +279,77 @@ func extractDeadLetterPayload(failedEntry string) (string, bool) {
 		return trimmed, true
 	}
 	return "", false
+}
+
+func parseDeadLetterEntry(raw string) DeadLetterEntry {
+	entry := DeadLetterEntry{
+		Payload: strings.TrimSpace(raw),
+		Raw:     raw,
+	}
+	if strings.TrimSpace(raw) == "" {
+		return entry
+	}
+
+	envelope := struct {
+		FailedAt string `json:"failedAt"`
+		Error    string `json:"error"`
+		Attempt  int    `json:"attempt"`
+		Payload  string `json:"payload"`
+	}{}
+	if err := json.Unmarshal([]byte(raw), &envelope); err == nil {
+		entry.FailedAt = strings.TrimSpace(envelope.FailedAt)
+		entry.Error = strings.TrimSpace(envelope.Error)
+		entry.Attempt = envelope.Attempt
+		payload := strings.TrimSpace(envelope.Payload)
+		if payload != "" {
+			entry.Payload = payload
+			_ = fillDeadLetterJobMetadata(&entry, payload)
+			return entry
+		}
+	}
+
+	_ = fillDeadLetterJobMetadata(&entry, entry.Payload)
+	return entry
+}
+
+func fillDeadLetterJobMetadata(entry *DeadLetterEntry, payload string) bool {
+	trimmed := strings.TrimSpace(payload)
+	if trimmed == "" {
+		return false
+	}
+
+	payloadCandidate := map[string]any{}
+	if err := json.Unmarshal([]byte(trimmed), &payloadCandidate); err != nil {
+		return false
+	}
+
+	projectID := mapString(payloadCandidate, "projectId")
+	sessionID := mapString(payloadCandidate, "sessionId")
+	triggerKind := mapString(payloadCandidate, "triggerKind")
+	route := mapString(payloadCandidate, "route")
+	site := mapString(payloadCandidate, "site")
+	if projectID == "" && sessionID == "" && triggerKind == "" && route == "" && site == "" {
+		return false
+	}
+
+	entry.ProjectID = projectID
+	entry.SessionID = sessionID
+	entry.TriggerKind = triggerKind
+	entry.Route = route
+	entry.Site = site
+	return true
+}
+
+func mapString(values map[string]any, key string) string {
+	value, ok := values[key]
+	if !ok {
+		return ""
+	}
+	stringValue, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(stringValue)
 }
 
 func (p *RedisProducer) ensureStreamQueues(ctx context.Context) error {

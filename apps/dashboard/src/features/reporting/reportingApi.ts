@@ -42,6 +42,27 @@ export interface QueueRedriveResult {
   remainingFailed: number;
 }
 
+export interface QueueDeadLetterEntry {
+  failedAt: string;
+  error: string;
+  attempt: number;
+  projectId: string;
+  sessionId: string;
+  triggerKind: string;
+  route: string;
+  site: string;
+  payload: string;
+  raw: string;
+}
+
+export interface QueueDeadLetterListResult {
+  queueKind: "replay" | "analysis";
+  limit: number;
+  total: number;
+  unparsable: number;
+  entries: QueueDeadLetterEntry[];
+}
+
 export interface IssueFeedbackEvent {
   id: string;
   projectId: string;
@@ -360,6 +381,20 @@ export const reportingApi = createApi({
       query: () => "/v1/admin/queue-health",
       transformResponse: (response: QueueHealthSnapshot) => response,
     }),
+    getQueueDeadLetters: builder.query<
+      QueueDeadLetterListResult,
+      { queue: "replay" | "analysis"; limit?: number }
+    >({
+      query: ({ queue, limit }) => {
+        const query = new URLSearchParams();
+        query.set("queue", queue);
+        if (typeof limit === "number") {
+          query.set("limit", String(limit));
+        }
+        return `/v1/admin/queue-dead-letters?${query.toString()}`;
+      },
+      transformResponse: (response: { result: QueueDeadLetterListResult }) => response.result,
+    }),
     redriveQueueDeadLetters: builder.mutation<
       { result: QueueRedriveResult },
       { queue: "replay" | "analysis"; limit?: number }
@@ -393,6 +428,7 @@ export const {
   useCreateProjectMutation,
   useCreateProjectKeyMutation,
   useGetQueueHealthQuery,
+  useGetQueueDeadLettersQuery,
   useRedriveQueueDeadLettersMutation,
   useListProjectsQuery,
   useListProjectKeysQuery,

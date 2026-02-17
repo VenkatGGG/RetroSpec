@@ -40,6 +40,22 @@ func (s *stubQueueRedriver) RedriveDeadLetters(_ context.Context, queueKind queu
 	return s.result, nil
 }
 
+type stubQueueDeadLetterInspector struct {
+	result    queue.DeadLetterListResult
+	err       error
+	queueKind queue.DeadLetterQueueKind
+	limit     int
+}
+
+func (s *stubQueueDeadLetterInspector) ListDeadLetters(_ context.Context, queueKind queue.DeadLetterQueueKind, limit int) (queue.DeadLetterListResult, error) {
+	s.queueKind = queueKind
+	s.limit = limit
+	if s.err != nil {
+		return queue.DeadLetterListResult{}, s.err
+	}
+	return s.result, nil
+}
+
 func TestGetQueueHealthUnavailableProvider(t *testing.T) {
 	handler := &Handler{}
 	request := httptest.NewRequest(http.MethodGet, "/v1/admin/queue-health", nil)
@@ -247,6 +263,82 @@ func TestRedriveDeadLettersSuccess(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 	if body.Result.Redriven != 5 || body.Result.Skipped != 1 || body.Result.RemainingFailed != 9 {
+		t.Fatalf("unexpected response body: %+v", body.Result)
+	}
+}
+
+func TestGetQueueDeadLettersUnavailableProvider(t *testing.T) {
+	handler := &Handler{}
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/queue-dead-letters?queue=replay", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.getQueueDeadLetters(recorder, request)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, recorder.Code)
+	}
+}
+
+func TestGetQueueDeadLettersRejectsInvalidQueueKind(t *testing.T) {
+	inspector := &stubQueueDeadLetterInspector{}
+	handler := &Handler{
+		queueDeadLetterInspector: inspector,
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/queue-dead-letters?queue=invalid", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.getQueueDeadLetters(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+}
+
+func TestGetQueueDeadLettersSuccess(t *testing.T) {
+	inspector := &stubQueueDeadLetterInspector{
+		result: queue.DeadLetterListResult{
+			QueueKind: queue.DeadLetterQueueReplay,
+			Limit:     10,
+			Total:     12,
+			Entries: []queue.DeadLetterEntry{
+				{
+					FailedAt:    "2026-02-17T10:00:00Z",
+					Error:       "render timeout",
+					Attempt:     3,
+					ProjectID:   "proj_a",
+					SessionID:   "sess_1",
+					TriggerKind: "js_exception",
+					Payload:     "{\"projectId\":\"proj_a\",\"sessionId\":\"sess_1\"}",
+				},
+			},
+			Unparsable: 1,
+		},
+	}
+	handler := &Handler{
+		queueDeadLetterInspector: inspector,
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/queue-dead-letters?queue=replay&limit=10", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.getQueueDeadLetters(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if inspector.queueKind != queue.DeadLetterQueueReplay {
+		t.Fatalf("expected replay queue kind, got %s", inspector.queueKind)
+	}
+	if inspector.limit != 10 {
+		t.Fatalf("expected limit=10, got %d", inspector.limit)
+	}
+
+	var body struct {
+		Result queue.DeadLetterListResult `json:"result"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body.Result.Total != 12 || len(body.Result.Entries) != 1 || body.Result.Unparsable != 1 {
 		t.Fatalf("unexpected response body: %+v", body.Result)
 	}
 }
