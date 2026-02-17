@@ -10,6 +10,7 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 - `POST /v1/admin/projects/{projectID}/keys`
 - `GET /v1/admin/projects/{projectID}/keys`
 - `GET /v1/admin/queue-dead-letters`
+- `POST /v1/admin/queue-dead-letters/purge`
 - `POST /v1/internal/replay-results`
 - `POST /v1/internal/analysis-reports`
 - `POST /v1/admin/queue-redrive`
@@ -53,6 +54,7 @@ go run ./cmd/api
 - `GET /v1/issues/{clusterKey}/sessions` returns the recent sessions mapped to a promoted cluster key, including report-card status/confidence.
   - Query params: `limit` (1-200), `reportStatus` (`pending|ready|failed|discarded`), `minConfidence` (0-1).
 - `GET /v1/admin/queue-dead-letters` accepts query params `queue=replay|analysis` and optional `limit` (1-200) for recent dead-letter payload inspection.
+- `POST /v1/admin/queue-dead-letters/purge` accepts `{ "queue": "replay|analysis", "scope": "failed|unprocessable", "limit": 25 }` and removes up to `limit` entries from the selected dead-letter scope.
 - `POST /v1/admin/queue-redrive` accepts `{ "queue": "replay|analysis", "limit": 25 }` and moves up to `limit` dead-letter payloads back to the Redis stream.
 - `GET /v1/issues` supports optional `state` filter: `active|open|acknowledged|resolved|muted`.
 - `POST /v1/issues/{clusterKey}/state` updates triage workflow state (`open|acknowledged|resolved|muted`) with assignee, note, and optional mute window.

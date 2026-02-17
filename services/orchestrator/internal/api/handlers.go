@@ -27,6 +27,7 @@ type Handler struct {
 	queueStatsProvider       queue.StatsProvider
 	queueRedriver            queue.DeadLetterRedriver
 	queueDeadLetterInspector queue.DeadLetterInspector
+	queueDeadLetterPurger    queue.DeadLetterPurger
 	corsAllowedOrigins       []string
 	adminAPIKey              string
 	internalAPIKey           string
@@ -92,6 +93,10 @@ func NewHandler(
 	if provider, ok := replayProducer.(queue.DeadLetterInspector); ok {
 		queueDeadLetterInspector = provider
 	}
+	var queueDeadLetterPurger queue.DeadLetterPurger
+	if provider, ok := replayProducer.(queue.DeadLetterPurger); ok {
+		queueDeadLetterPurger = provider
+	}
 
 	metrics := newAPIMetrics(queueStatsProvider)
 
@@ -101,6 +106,7 @@ func NewHandler(
 		queueStatsProvider:       queueStatsProvider,
 		queueRedriver:            queueRedriver,
 		queueDeadLetterInspector: queueDeadLetterInspector,
+		queueDeadLetterPurger:    queueDeadLetterPurger,
 		artifactStore:            artifactStore,
 		corsAllowedOrigins:       corsAllowedOrigins,
 		adminAPIKey:              adminAPIKey,
@@ -153,6 +159,7 @@ func (h *Handler) Router() http.Handler {
 			r.With(h.requireAdminAccess).Post("/projects/{projectID}/keys", h.createProjectAPIKey)
 			r.With(h.requireAdminAccess).Get("/queue-health", h.getQueueHealth)
 			r.With(h.requireAdminAccess).Get("/queue-dead-letters", h.getQueueDeadLetters)
+			r.With(h.requireAdminAccess).Post("/queue-dead-letters/purge", h.purgeQueueDeadLetters)
 			r.With(h.requireAdminAccess).Post("/queue-redrive", h.redriveDeadLetters)
 		})
 		r.With(h.requireInternalAccess).Post("/internal/replay-results", h.reportReplayResult)
@@ -381,6 +388,12 @@ type queueRedriveRequest struct {
 	Limit int    `json:"limit"`
 }
 
+type queuePurgeRequest struct {
+	Queue string `json:"queue"`
+	Scope string `json:"scope"`
+	Limit int    `json:"limit"`
+}
+
 func (h *Handler) listProjectAPIKeys(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	keys, err := h.store.ListProjectAPIKeys(r.Context(), projectID)
@@ -539,6 +552,52 @@ func (h *Handler) getQueueDeadLetters(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) purgeQueueDeadLetters(w http.ResponseWriter, r *http.Request) {
+	if h.queueDeadLetterPurger == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue dead-letter purge unavailable"})
+		return
+	}
+
+	payload := queuePurgeRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	queueKind, ok := parseDeadLetterQueueKind(payload.Queue)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "queue must be replay or analysis"})
+		return
+	}
+
+	scope, ok := parseDeadLetterScope(payload.Scope)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope must be failed or unprocessable"})
+		return
+	}
+
+	limit := payload.Limit
+	if limit < 1 {
+		limit = 25
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+
+	result, err := h.queueDeadLetterPurger.PurgeDeadLetters(ctx, queueKind, scope, limit)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue dead-letter purge failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"result": result,
+	})
+}
+
 func (h *Handler) redriveDeadLetters(w http.ResponseWriter, r *http.Request) {
 	if h.queueRedriver == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue redrive unavailable"})
@@ -585,6 +644,17 @@ func parseDeadLetterQueueKind(value string) (queue.DeadLetterQueueKind, bool) {
 		return queue.DeadLetterQueueReplay, true
 	case "analysis":
 		return queue.DeadLetterQueueAnalysis, true
+	default:
+		return "", false
+	}
+}
+
+func parseDeadLetterScope(value string) (queue.DeadLetterScope, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "failed":
+		return queue.DeadLetterScopeFailed, true
+	case "unprocessable":
+		return queue.DeadLetterScopeUnprocessable, true
 	default:
 		return "", false
 	}

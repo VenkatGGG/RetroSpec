@@ -7,6 +7,7 @@ import {
   useGetQueueHealthQuery,
   useListProjectKeysQuery,
   useListProjectsQuery,
+  usePurgeQueueDeadLettersMutation,
   useRedriveQueueDeadLettersMutation,
 } from "../features/reporting/reportingApi";
 
@@ -54,6 +55,8 @@ export function AdminPage() {
   const [createProjectKey, { isLoading: isCreatingKey }] = useCreateProjectKeyMutation();
   const [redriveQueueDeadLetters, { isLoading: isRedrivingQueue }] =
     useRedriveQueueDeadLettersMutation();
+  const [purgeQueueDeadLetters, { isLoading: isPurgingQueue }] =
+    usePurgeQueueDeadLettersMutation();
 
   const handleCreateProject = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -94,6 +97,27 @@ export function AdminPage() {
       void refetchDeadLetters();
     } catch {
       setResultMessage("Queue re-drive failed. Verify admin auth and Redis connectivity.");
+    }
+  };
+
+  const handleQueuePurge = async (scope: "failed" | "unprocessable") => {
+    const parsedLimit = Number.parseInt(deadLetterLimit, 10);
+    const limit =
+      Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(500, parsedLimit) : 25;
+
+    try {
+      const response = await purgeQueueDeadLetters({
+        queue: deadLetterQueue,
+        scope,
+        limit,
+      }).unwrap();
+      setResultMessage(
+        `Purged ${response.result.deleted} ${response.result.scope} entries from ${response.result.queueKind}. Remaining: ${response.result.remaining}.`,
+      );
+      void refetchQueueHealth();
+      void refetchDeadLetters();
+    } catch {
+      setResultMessage("Queue purge failed. Verify admin auth and Redis connectivity.");
     }
   };
 
@@ -200,6 +224,20 @@ export function AdminPage() {
                 disabled={isDeadLettersFetching}
               >
                 {isDeadLettersFetching ? "Refreshing..." : "Refresh dead-letter"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleQueuePurge("failed")}
+                disabled={isPurgingQueue}
+              >
+                {isPurgingQueue ? "Purging..." : "Purge failed"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleQueuePurge("unprocessable")}
+                disabled={isPurgingQueue}
+              >
+                {isPurgingQueue ? "Purging..." : "Purge unparsable"}
               </button>
             </div>
             {isDeadLettersLoading && <p>Loading dead-letter entries...</p>}

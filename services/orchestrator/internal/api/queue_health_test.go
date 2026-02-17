@@ -56,6 +56,24 @@ func (s *stubQueueDeadLetterInspector) ListDeadLetters(_ context.Context, queueK
 	return s.result, nil
 }
 
+type stubQueueDeadLetterPurger struct {
+	result    queue.DeadLetterPurgeResult
+	err       error
+	queueKind queue.DeadLetterQueueKind
+	scope     queue.DeadLetterScope
+	limit     int
+}
+
+func (s *stubQueueDeadLetterPurger) PurgeDeadLetters(_ context.Context, queueKind queue.DeadLetterQueueKind, scope queue.DeadLetterScope, limit int) (queue.DeadLetterPurgeResult, error) {
+	s.queueKind = queueKind
+	s.scope = scope
+	s.limit = limit
+	if s.err != nil {
+		return queue.DeadLetterPurgeResult{}, s.err
+	}
+	return s.result, nil
+}
+
 func TestGetQueueHealthUnavailableProvider(t *testing.T) {
 	handler := &Handler{}
 	request := httptest.NewRequest(http.MethodGet, "/v1/admin/queue-health", nil)
@@ -339,6 +357,75 @@ func TestGetQueueDeadLettersSuccess(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 	if body.Result.Total != 12 || len(body.Result.Entries) != 1 || body.Result.Unparsable != 1 {
+		t.Fatalf("unexpected response body: %+v", body.Result)
+	}
+}
+
+func TestPurgeQueueDeadLettersUnavailableProvider(t *testing.T) {
+	handler := &Handler{}
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/queue-dead-letters/purge", strings.NewReader(`{"queue":"replay","scope":"failed","limit":5}`))
+	recorder := httptest.NewRecorder()
+
+	handler.purgeQueueDeadLetters(recorder, request)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, recorder.Code)
+	}
+}
+
+func TestPurgeQueueDeadLettersRejectsInvalidScope(t *testing.T) {
+	purger := &stubQueueDeadLetterPurger{}
+	handler := &Handler{
+		queueDeadLetterPurger: purger,
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/queue-dead-letters/purge", strings.NewReader(`{"queue":"replay","scope":"invalid","limit":5}`))
+	recorder := httptest.NewRecorder()
+
+	handler.purgeQueueDeadLetters(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+}
+
+func TestPurgeQueueDeadLettersSuccess(t *testing.T) {
+	purger := &stubQueueDeadLetterPurger{
+		result: queue.DeadLetterPurgeResult{
+			QueueKind: queue.DeadLetterQueueAnalysis,
+			Scope:     queue.DeadLetterScopeUnprocessable,
+			Requested: 5,
+			Deleted:   2,
+			Remaining: 4,
+		},
+	}
+	handler := &Handler{
+		queueDeadLetterPurger: purger,
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/queue-dead-letters/purge", strings.NewReader(`{"queue":"analysis","scope":"unprocessable","limit":5}`))
+	recorder := httptest.NewRecorder()
+
+	handler.purgeQueueDeadLetters(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+	if purger.queueKind != queue.DeadLetterQueueAnalysis {
+		t.Fatalf("expected analysis queue kind, got %s", purger.queueKind)
+	}
+	if purger.scope != queue.DeadLetterScopeUnprocessable {
+		t.Fatalf("expected unprocessable scope, got %s", purger.scope)
+	}
+	if purger.limit != 5 {
+		t.Fatalf("expected limit=5, got %d", purger.limit)
+	}
+
+	var body struct {
+		Result queue.DeadLetterPurgeResult `json:"result"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body.Result.Deleted != 2 || body.Result.Remaining != 4 {
 		t.Fatalf("unexpected response body: %+v", body.Result)
 	}
 }

@@ -63,6 +63,14 @@ export interface QueueDeadLetterListResult {
   entries: QueueDeadLetterEntry[];
 }
 
+export interface QueueDeadLetterPurgeResult {
+  queueKind: "replay" | "analysis";
+  scope: "failed" | "unprocessable";
+  requested: number;
+  deleted: number;
+  remaining: number;
+}
+
 export interface IssueFeedbackEvent {
   id: string;
   projectId: string;
@@ -408,6 +416,20 @@ export const reportingApi = createApi({
         },
       }),
     }),
+    purgeQueueDeadLetters: builder.mutation<
+      { result: QueueDeadLetterPurgeResult },
+      { queue: "replay" | "analysis"; scope?: "failed" | "unprocessable"; limit?: number }
+    >({
+      query: ({ queue, scope, limit }) => ({
+        url: "/v1/admin/queue-dead-letters/purge",
+        method: "POST",
+        body: {
+          queue,
+          scope,
+          limit,
+        },
+      }),
+    }),
   }),
 });
 
@@ -429,6 +451,7 @@ export const {
   useCreateProjectKeyMutation,
   useGetQueueHealthQuery,
   useGetQueueDeadLettersQuery,
+  usePurgeQueueDeadLettersMutation,
   useRedriveQueueDeadLettersMutation,
   useListProjectsQuery,
   useListProjectKeysQuery,

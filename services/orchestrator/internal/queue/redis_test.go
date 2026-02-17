@@ -357,6 +357,48 @@ func TestRedisProducerListDeadLetters(t *testing.T) {
 	}
 }
 
+func TestRedisProducerPurgeDeadLetters(t *testing.T) {
+	mr := miniredis.RunT(t)
+	ctx := context.Background()
+	replayQueue := "replay-jobs"
+	analysisQueue := "analysis-jobs"
+
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
+
+	producer, err := NewRedisProducer(mr.Addr(), replayQueue, analysisQueue)
+	if err != nil {
+		t.Fatalf("new producer failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = producer.Close()
+	})
+
+	if err := client.LPush(ctx, replayQueue+":failed", "a", "b", "c").Err(); err != nil {
+		t.Fatalf("seed replay failed queue failed: %v", err)
+	}
+	result, err := producer.PurgeDeadLetters(ctx, DeadLetterQueueReplay, DeadLetterScopeFailed, 2)
+	if err != nil {
+		t.Fatalf("purge dead-letters failed: %v", err)
+	}
+	if result.Deleted != 2 || result.Remaining != 1 {
+		t.Fatalf("unexpected purge result: %+v", result)
+	}
+
+	if err := client.LPush(ctx, analysisQueue+":failed:unprocessable", "x", "y").Err(); err != nil {
+		t.Fatalf("seed analysis unprocessable queue failed: %v", err)
+	}
+	unprocessableResult, err := producer.PurgeDeadLetters(ctx, DeadLetterQueueAnalysis, DeadLetterScopeUnprocessable, 10)
+	if err != nil {
+		t.Fatalf("purge unprocessable dead-letters failed: %v", err)
+	}
+	if unprocessableResult.Deleted != 2 || unprocessableResult.Remaining != 0 {
+		t.Fatalf("unexpected unprocessable purge result: %+v", unprocessableResult)
+	}
+}
+
 func marshalFailedEntry(payload string, details string) (string, error) {
 	entry := map[string]any{
 		"failedAt": "2026-01-01T00:00:00Z",

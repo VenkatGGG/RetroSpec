@@ -242,6 +242,58 @@ func (p *RedisProducer) ListDeadLetters(ctx context.Context, queueKind DeadLette
 	}, nil
 }
 
+func (p *RedisProducer) PurgeDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, scope DeadLetterScope, limit int) (DeadLetterPurgeResult, error) {
+	if err := p.ensureStreamQueues(ctx); err != nil {
+		return DeadLetterPurgeResult{}, err
+	}
+
+	queueName, err := p.deadLetterQueueName(queueKind)
+	if err != nil {
+		return DeadLetterPurgeResult{}, err
+	}
+
+	key, err := deadLetterScopeKey(queueName, scope)
+	if err != nil {
+		return DeadLetterPurgeResult{}, err
+	}
+
+	normalizedLimit := limit
+	if normalizedLimit < 1 {
+		normalizedLimit = 1
+	}
+	if normalizedLimit > 500 {
+		normalizedLimit = 500
+	}
+
+	deleted := 0
+	for attempt := 0; attempt < normalizedLimit; attempt++ {
+		_, popErr := p.client.RPop(ctx, key).Result()
+		if errors.Is(popErr, redis.Nil) {
+			break
+		}
+		if popErr != nil {
+			return DeadLetterPurgeResult{}, fmt.Errorf("purge dead-letter entry: %w", popErr)
+		}
+		deleted++
+	}
+
+	remaining, err := p.client.LLen(ctx, key).Result()
+	if err != nil && err != redis.Nil {
+		return DeadLetterPurgeResult{}, fmt.Errorf("dead-letter remaining depth: %w", err)
+	}
+	if errors.Is(err, redis.Nil) {
+		remaining = 0
+	}
+
+	return DeadLetterPurgeResult{
+		QueueKind: queueKind,
+		Scope:     scope,
+		Requested: normalizedLimit,
+		Deleted:   deleted,
+		Remaining: remaining,
+	}, nil
+}
+
 func (p *RedisProducer) deadLetterQueueName(queueKind DeadLetterQueueKind) (string, error) {
 	switch queueKind {
 	case DeadLetterQueueReplay:
@@ -250,6 +302,17 @@ func (p *RedisProducer) deadLetterQueueName(queueKind DeadLetterQueueKind) (stri
 		return p.analysisQueueName, nil
 	default:
 		return "", fmt.Errorf("unsupported queue kind %q", queueKind)
+	}
+}
+
+func deadLetterScopeKey(queueName string, scope DeadLetterScope) (string, error) {
+	switch scope {
+	case DeadLetterScopeFailed:
+		return queueName + ":failed", nil
+	case DeadLetterScopeUnprocessable:
+		return queueName + ":failed:unprocessable", nil
+	default:
+		return "", fmt.Errorf("unsupported dead-letter scope %q", scope)
 	}
 }
 

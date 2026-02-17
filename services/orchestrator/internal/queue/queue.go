@@ -68,6 +68,21 @@ type DeadLetterListResult struct {
 	Unparsable int64               `json:"unparsable"`
 }
 
+type DeadLetterScope string
+
+const (
+	DeadLetterScopeFailed        DeadLetterScope = "failed"
+	DeadLetterScopeUnprocessable DeadLetterScope = "unprocessable"
+)
+
+type DeadLetterPurgeResult struct {
+	QueueKind DeadLetterQueueKind `json:"queueKind"`
+	Scope     DeadLetterScope     `json:"scope"`
+	Requested int                 `json:"requested"`
+	Deleted   int                 `json:"deleted"`
+	Remaining int64               `json:"remaining"`
+}
+
 type Producer interface {
 	EnqueueReplayJob(ctx context.Context, job ReplayJob) error
 	EnqueueAnalysisJob(ctx context.Context, job AnalysisJob) error
@@ -84,6 +99,10 @@ type DeadLetterRedriver interface {
 
 type DeadLetterInspector interface {
 	ListDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, limit int) (DeadLetterListResult, error)
+}
+
+type DeadLetterPurger interface {
+	PurgeDeadLetters(ctx context.Context, queueKind DeadLetterQueueKind, scope DeadLetterScope, limit int) (DeadLetterPurgeResult, error)
 }
 
 type NoopProducer struct{}
@@ -119,5 +138,13 @@ func (p *NoopProducer) ListDeadLetters(_ context.Context, queueKind DeadLetterQu
 	return DeadLetterListResult{
 		QueueKind: queueKind,
 		Limit:     limit,
+	}, nil
+}
+
+func (p *NoopProducer) PurgeDeadLetters(_ context.Context, queueKind DeadLetterQueueKind, scope DeadLetterScope, limit int) (DeadLetterPurgeResult, error) {
+	return DeadLetterPurgeResult{
+		QueueKind: queueKind,
+		Scope:     scope,
+		Requested: limit,
 	}, nil
 }
