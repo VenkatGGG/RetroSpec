@@ -110,6 +110,7 @@ func (h *Handler) Router() http.Handler {
 			r.With(h.requireAdminAccess).Post("/projects/{projectID}/keys", h.createProjectAPIKey)
 		})
 		r.With(h.requireInternalAccess).Post("/internal/replay-results", h.reportReplayResult)
+		r.With(h.requireInternalAccess).Post("/internal/analysis-reports", h.reportAnalysisResult)
 		r.With(h.withProjectContextAllowQueryKey).Get("/sessions/{sessionID}/artifacts/{artifactType}", h.getSessionArtifact)
 
 		r.Group(func(r chi.Router) {
@@ -162,6 +163,23 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 	}
 	analysisQueueError := ""
 	if job, ok := buildAnalysisJob(stored); ok {
+		if _, err := h.store.UpsertSessionReportCard(
+			r.Context(),
+			stored.ProjectID,
+			stored.ID,
+			"pending",
+			"",
+			"",
+			"",
+			"",
+			"",
+			0,
+			time.Now().UTC(),
+		); err != nil {
+			analysisQueueError = err.Error()
+			h.metrics.analysisQueueErrorsTotal.Add(1)
+			log.Printf("analysis report init failed session=%s err=%v", stored.ID, err)
+		}
 		if err := h.replayProducer.EnqueueAnalysisJob(r.Context(), job); err != nil {
 			analysisQueueError = err.Error()
 			h.metrics.analysisQueueErrorsTotal.Add(1)
@@ -244,6 +262,19 @@ type reportReplayResultRequest struct {
 	Status       string                 `json:"status"`
 	GeneratedAt  string                 `json:"generatedAt"`
 	Windows      []store.ArtifactWindow `json:"windows"`
+}
+
+type reportAnalysisResultRequest struct {
+	ProjectID          string  `json:"projectId"`
+	SessionID          string  `json:"sessionId"`
+	Status             string  `json:"status"`
+	Symptom            string  `json:"symptom"`
+	TechnicalRootCause string  `json:"technicalRootCause"`
+	SuggestedFix       string  `json:"suggestedFix"`
+	TextSummary        string  `json:"textSummary"`
+	VisualSummary      string  `json:"visualSummary"`
+	Confidence         float64 `json:"confidence"`
+	GeneratedAt        string  `json:"generatedAt"`
 }
 
 func (h *Handler) listProjectAPIKeys(w http.ResponseWriter, r *http.Request) {
@@ -343,6 +374,59 @@ func (h *Handler) reportReplayResult(w http.ResponseWriter, r *http.Request) {
 		"artifact": artifact,
 	})
 	h.metrics.replayArtifactsTotal.Add(1)
+}
+
+func (h *Handler) reportAnalysisResult(w http.ResponseWriter, r *http.Request) {
+	payload := reportAnalysisResultRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	projectID := strings.TrimSpace(payload.ProjectID)
+	sessionID := strings.TrimSpace(payload.SessionID)
+	if projectID == "" || sessionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "projectId and sessionId are required"})
+		return
+	}
+
+	if _, err := h.loadSession(r.Context(), projectID, sessionID); err != nil {
+		writeLookupError(w, err)
+		return
+	}
+
+	generatedAt := time.Now().UTC()
+	if candidate := strings.TrimSpace(payload.GeneratedAt); candidate != "" {
+		parsedTime, err := time.Parse(time.RFC3339Nano, candidate)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "generatedAt must be RFC3339 timestamp"})
+			return
+		}
+		generatedAt = parsedTime
+	}
+
+	report, err := h.store.UpsertSessionReportCard(
+		r.Context(),
+		projectID,
+		sessionID,
+		payload.Status,
+		payload.Symptom,
+		payload.TechnicalRootCause,
+		payload.SuggestedFix,
+		payload.TextSummary,
+		payload.VisualSummary,
+		payload.Confidence,
+		generatedAt,
+	)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "report upsert failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"report": report,
+	})
+	h.metrics.analysisReportsTotal.Add(1)
 }
 
 func (h *Handler) uploadSessionEvents(w http.ResponseWriter, r *http.Request) {

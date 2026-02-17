@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -464,6 +465,37 @@ func (p *Postgres) GetSession(ctx context.Context, projectID, id string) (Sessio
 		return Session{}, artifactRows.Err()
 	}
 
+	report := SessionReportCard{}
+	reportErr := p.pool.QueryRow(
+		ctx,
+		`SELECT id, project_id, session_id, status, symptom, technical_root_cause, suggested_fix, text_summary, visual_summary, confidence, generated_at, created_at, updated_at
+		 FROM session_report_cards
+		 WHERE project_id = $1
+		   AND session_id = $2`,
+		projectID,
+		id,
+	).Scan(
+		&report.ID,
+		&report.ProjectID,
+		&report.SessionID,
+		&report.Status,
+		&report.Symptom,
+		&report.TechnicalRootCause,
+		&report.SuggestedFix,
+		&report.TextSummary,
+		&report.VisualSummary,
+		&report.Confidence,
+		&report.GeneratedAt,
+		&report.CreatedAt,
+		&report.UpdatedAt,
+	)
+	if reportErr != nil && !errors.Is(reportErr, pgx.ErrNoRows) {
+		return Session{}, reportErr
+	}
+	if reportErr == nil {
+		session.ReportCard = &report
+	}
+
 	return session, nil
 }
 
@@ -818,6 +850,93 @@ func (p *Postgres) UpsertSessionArtifact(
 	return stored, nil
 }
 
+func (p *Postgres) UpsertSessionReportCard(
+	ctx context.Context,
+	projectID string,
+	sessionID string,
+	status string,
+	symptom string,
+	technicalRootCause string,
+	suggestedFix string,
+	textSummary string,
+	visualSummary string,
+	confidence float64,
+	generatedAt time.Time,
+) (SessionReportCard, error) {
+	projectID = normalizeProjectID(projectID)
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return SessionReportCard{}, fmt.Errorf("sessionID is required")
+	}
+
+	status = normalizeReportStatus(status)
+	symptom = strings.TrimSpace(symptom)
+	technicalRootCause = strings.TrimSpace(technicalRootCause)
+	suggestedFix = strings.TrimSpace(suggestedFix)
+	textSummary = strings.TrimSpace(textSummary)
+	visualSummary = strings.TrimSpace(visualSummary)
+	if confidence < 0 {
+		confidence = 0
+	}
+	if confidence > 1 {
+		confidence = 1
+	}
+	if generatedAt.IsZero() {
+		generatedAt = time.Now().UTC()
+	}
+
+	reportID := "report_" + uuid.NewString()
+	report := SessionReportCard{}
+	err := p.pool.QueryRow(
+		ctx,
+		`INSERT INTO session_report_cards (
+		   id, project_id, session_id, status, symptom, technical_root_cause, suggested_fix, text_summary, visual_summary, confidence, generated_at
+		 )
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		 ON CONFLICT (project_id, session_id) DO UPDATE
+		 SET status = EXCLUDED.status,
+		     symptom = EXCLUDED.symptom,
+		     technical_root_cause = EXCLUDED.technical_root_cause,
+		     suggested_fix = EXCLUDED.suggested_fix,
+		     text_summary = EXCLUDED.text_summary,
+		     visual_summary = EXCLUDED.visual_summary,
+		     confidence = EXCLUDED.confidence,
+		     generated_at = EXCLUDED.generated_at,
+		     updated_at = NOW()
+		 RETURNING id, project_id, session_id, status, symptom, technical_root_cause, suggested_fix, text_summary, visual_summary, confidence, generated_at, created_at, updated_at`,
+		reportID,
+		projectID,
+		sessionID,
+		status,
+		symptom,
+		technicalRootCause,
+		suggestedFix,
+		textSummary,
+		visualSummary,
+		confidence,
+		generatedAt,
+	).Scan(
+		&report.ID,
+		&report.ProjectID,
+		&report.SessionID,
+		&report.Status,
+		&report.Symptom,
+		&report.TechnicalRootCause,
+		&report.SuggestedFix,
+		&report.TextSummary,
+		&report.VisualSummary,
+		&report.Confidence,
+		&report.GeneratedAt,
+		&report.CreatedAt,
+		&report.UpdatedAt,
+	)
+	if err != nil {
+		return SessionReportCard{}, err
+	}
+
+	return report, nil
+}
+
 func normalizeMarkerKind(kind string) string {
 	trimmed := strings.TrimSpace(kind)
 	switch trimmed {
@@ -825,6 +944,15 @@ func normalizeMarkerKind(kind string) string {
 		return trimmed
 	default:
 		return "ui_no_effect"
+	}
+}
+
+func normalizeReportStatus(status string) string {
+	switch strings.TrimSpace(status) {
+	case "pending", "ready", "failed":
+		return strings.TrimSpace(status)
+	default:
+		return "pending"
 	}
 }
 

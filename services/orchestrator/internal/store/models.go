@@ -3,16 +3,17 @@ package store
 import "time"
 
 type Session struct {
-	ID              string            `json:"id"`
-	ProjectID       string            `json:"projectId"`
-	Site            string            `json:"site"`
-	Route           string            `json:"route"`
-	StartedAt       time.Time         `json:"startedAt"`
-	DurationMs      int               `json:"durationMs"`
-	EventsObjectKey string            `json:"eventsObjectKey"`
-	CreatedAt       time.Time         `json:"createdAt"`
-	Markers         []ErrorMark       `json:"markers"`
-	Artifacts       []SessionArtifact `json:"artifacts"`
+	ID              string             `json:"id"`
+	ProjectID       string             `json:"projectId"`
+	Site            string             `json:"site"`
+	Route           string             `json:"route"`
+	StartedAt       time.Time          `json:"startedAt"`
+	DurationMs      int                `json:"durationMs"`
+	EventsObjectKey string             `json:"eventsObjectKey"`
+	CreatedAt       time.Time          `json:"createdAt"`
+	Markers         []ErrorMark        `json:"markers"`
+	Artifacts       []SessionArtifact  `json:"artifacts"`
+	ReportCard      *SessionReportCard `json:"reportCard,omitempty"`
 }
 
 type ErrorMark struct {
@@ -104,6 +105,22 @@ type SessionArtifact struct {
 	CreatedAt    time.Time        `json:"createdAt"`
 	UpdatedAt    time.Time        `json:"updatedAt"`
 	Windows      []ArtifactWindow `json:"windows"`
+}
+
+type SessionReportCard struct {
+	ID                 string    `json:"id"`
+	ProjectID          string    `json:"projectId"`
+	SessionID          string    `json:"sessionId"`
+	Status             string    `json:"status"`
+	Symptom            string    `json:"symptom"`
+	TechnicalRootCause string    `json:"technicalRootCause"`
+	SuggestedFix       string    `json:"suggestedFix"`
+	TextSummary        string    `json:"textSummary"`
+	VisualSummary      string    `json:"visualSummary"`
+	Confidence         float64   `json:"confidence"`
+	GeneratedAt        time.Time `json:"generatedAt"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
 type CleanupResult struct {
