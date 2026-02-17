@@ -21,6 +21,7 @@ const config = loadConfig();
 const queueName = config.queueName;
 const failedQueueName = `${config.queueName}:failed`;
 const retryQueueName = `${config.queueName}:retry`;
+const processingQueueName = `${config.queueName}:processing`;
 
 const redis = new Redis({
   host: config.redisHost,
@@ -74,6 +75,23 @@ async function enqueueRetry(payload: unknown, attempt: number): Promise<void> {
   await redis.zadd(retryQueueName, runAtMs, JSON.stringify(payload));
 }
 
+async function recoverInFlightJobs(): Promise<void> {
+  let moved = 0;
+  while (true) {
+    const payload = await redis.rpoplpush(processingQueueName, queueName);
+    if (!payload) {
+      break;
+    }
+    moved += 1;
+    if (moved >= 10_000) {
+      break;
+    }
+  }
+  if (moved > 0) {
+    console.warn(`[analyzer-worker] recovered in-flight jobs=${moved}`);
+  }
+}
+
 async function reportFailure(
   parsed: z.infer<typeof analysisJobSchema>,
   details: string,
@@ -103,6 +121,7 @@ async function reportFailure(
 
 async function workerLoop() {
   console.info(`[analyzer-worker] listening queue=${queueName}`);
+  await recoverInFlightJobs();
 
   while (!shuttingDown) {
     let rawPayload = "";
@@ -110,12 +129,12 @@ async function workerLoop() {
     try {
       await drainRetryQueue();
 
-      const item = await redis.brpop(queueName, 5);
-      if (!item) {
+      const payload = await redis.brpoplpush(queueName, processingQueueName, 5);
+      if (!payload) {
         continue;
       }
 
-      rawPayload = item[1];
+      rawPayload = payload;
       parsed = analysisJobSchema.parse(JSON.parse(rawPayload));
       const doneKey = dedupeKey(parsed);
       const alreadyDone = await redis.get(doneKey);
@@ -159,6 +178,11 @@ async function workerLoop() {
         if (parsed) {
           await reportFailure(parsed, details);
         }
+      }
+    }
+    finally {
+      if (rawPayload) {
+        await redis.lrem(processingQueueName, 1, rawPayload);
       }
     }
   }

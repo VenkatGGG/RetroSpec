@@ -8,9 +8,10 @@ Async worker that consumes `analysis-jobs` from Redis and writes per-session rep
 - Supports provider modes:
   - `heuristic`: deterministic report generation.
   - `dual_http`: calls separate text and visual model endpoints and merges both paths.
+- `dual_http` responses are validated against a strict schema contract before being merged.
 - Remote model payloads are sampled around marker windows and redacted for common sensitive tokens.
 - Reports `pending -> ready/failed` status via `POST /v1/internal/analysis-reports`.
-- Retries failed jobs with exponential backoff and dead-letters exhausted payloads.
+- Retries failed jobs with exponential backoff, recovers in-flight jobs from a processing queue, and dead-letters exhausted payloads.
 
 ## Provider Config
 
@@ -25,4 +26,4 @@ Async worker that consumes `analysis-jobs` from Redis and writes per-session rep
 
 ## Next Step
 
-Harden model contracts with strict JSON schemas and add redaction layers before sending remote model payloads.
+Move queue consumption to Redis Streams/SQS-style acknowledgements for stronger durability under worker crashes.
