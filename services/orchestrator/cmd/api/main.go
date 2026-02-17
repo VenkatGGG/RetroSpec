@@ -87,6 +87,15 @@ func main() {
 
 	shutdownCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	startMaintenanceLoops(
+		shutdownCtx,
+		db,
+		artifactStore,
+		time.Duration(cfg.AutoCleanupIntervalMinutes)*time.Minute,
+		time.Duration(cfg.AutoPromoteIntervalMinutes)*time.Minute,
+		cfg.SessionRetentionDays,
+		cfg.ClusterPromoteMinSessions,
+	)
 
 	go func() {
 		log.Printf("orchestrator listening on %s", cfg.ListenAddr)

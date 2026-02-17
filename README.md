@@ -56,6 +56,7 @@ Replay worker retries failed jobs automatically (`REPLAY_MAX_ATTEMPTS`, `REPLAY_
 Replay worker deduplicates repeated payloads for a TTL window (`REPLAY_DEDUPE_WINDOW_SEC`).
 API rate limiting is configurable with `RATE_LIMIT_REQUESTS_PER_SEC` and `RATE_LIMIT_BURST`.
 The orchestrator exposes Prometheus-style counters at `GET /metrics`.
+Optional background maintenance loops can be enabled with `AUTO_CLEANUP_INTERVAL_MINUTES` and `AUTO_PROMOTE_INTERVAL_MINUTES`.
 
 ## Website Integration (SDK)
 

@@ -7,50 +7,54 @@ import (
 )
 
 type Config struct {
-	ListenAddr                string
-	DatabaseURL               string
-	RedisAddr                 string
-	ReplayQueueName           string
-	CORSAllowedOrigins        []string
-	AdminAPIKey               string
-	InternalAPIKey            string
-	IngestAPIKey              string
-	ArtifactTokenSecret       string
-	ArtifactTokenTTLSeconds   int
-	RateLimitRequestsPerSec   float64
-	RateLimitBurst            int
-	SessionRetentionDays      int
-	S3Region                  string
-	S3Endpoint                string
-	S3AccessKey               string
-	S3SecretKey               string
-	S3Bucket                  string
-	ClusterPromoteMinSessions int
+	ListenAddr                 string
+	DatabaseURL                string
+	RedisAddr                  string
+	ReplayQueueName            string
+	CORSAllowedOrigins         []string
+	AdminAPIKey                string
+	InternalAPIKey             string
+	IngestAPIKey               string
+	ArtifactTokenSecret        string
+	ArtifactTokenTTLSeconds    int
+	RateLimitRequestsPerSec    float64
+	RateLimitBurst             int
+	AutoCleanupIntervalMinutes int
+	AutoPromoteIntervalMinutes int
+	SessionRetentionDays       int
+	S3Region                   string
+	S3Endpoint                 string
+	S3AccessKey                string
+	S3SecretKey                string
+	S3Bucket                   string
+	ClusterPromoteMinSessions  int
 }
 
 func Load() Config {
 	port := envOrDefault("ORCHESTRATOR_PORT", "8080")
 
 	return Config{
-		ListenAddr:                ":" + port,
-		DatabaseURL:               databaseURL(),
-		RedisAddr:                 redisAddr(),
-		ReplayQueueName:           envOrDefault("REPLAY_QUEUE_NAME", "replay-jobs"),
-		CORSAllowedOrigins:        parseCSV(envOrDefault("CORS_ALLOWED_ORIGINS", "*")),
-		AdminAPIKey:               os.Getenv("ADMIN_API_KEY"),
-		InternalAPIKey:            os.Getenv("INTERNAL_API_KEY"),
-		IngestAPIKey:              os.Getenv("INGEST_API_KEY"),
-		ArtifactTokenSecret:       artifactTokenSecret(),
-		ArtifactTokenTTLSeconds:   envOrDefaultInt("ARTIFACT_TOKEN_TTL_SECONDS", 300),
-		RateLimitRequestsPerSec:   envOrDefaultFloat("RATE_LIMIT_REQUESTS_PER_SEC", 25),
-		RateLimitBurst:            envOrDefaultInt("RATE_LIMIT_BURST", 50),
-		SessionRetentionDays:      envOrDefaultInt("SESSION_RETENTION_DAYS", 7),
-		S3Region:                  envOrDefault("S3_REGION", "us-east-1"),
-		S3Endpoint:                os.Getenv("S3_ENDPOINT"),
-		S3AccessKey:               envOrDefault("S3_ACCESS_KEY", ""),
-		S3SecretKey:               envOrDefault("S3_SECRET_KEY", ""),
-		S3Bucket:                  envOrDefault("S3_BUCKET", ""),
-		ClusterPromoteMinSessions: envOrDefaultInt("CLUSTER_PROMOTE_MIN_SESSIONS", 2),
+		ListenAddr:                 ":" + port,
+		DatabaseURL:                databaseURL(),
+		RedisAddr:                  redisAddr(),
+		ReplayQueueName:            envOrDefault("REPLAY_QUEUE_NAME", "replay-jobs"),
+		CORSAllowedOrigins:         parseCSV(envOrDefault("CORS_ALLOWED_ORIGINS", "*")),
+		AdminAPIKey:                os.Getenv("ADMIN_API_KEY"),
+		InternalAPIKey:             os.Getenv("INTERNAL_API_KEY"),
+		IngestAPIKey:               os.Getenv("INGEST_API_KEY"),
+		ArtifactTokenSecret:        artifactTokenSecret(),
+		ArtifactTokenTTLSeconds:    envOrDefaultInt("ARTIFACT_TOKEN_TTL_SECONDS", 300),
+		RateLimitRequestsPerSec:    envOrDefaultFloat("RATE_LIMIT_REQUESTS_PER_SEC", 25),
+		RateLimitBurst:             envOrDefaultInt("RATE_LIMIT_BURST", 50),
+		AutoCleanupIntervalMinutes: envOrDefaultInt("AUTO_CLEANUP_INTERVAL_MINUTES", 0),
+		AutoPromoteIntervalMinutes: envOrDefaultInt("AUTO_PROMOTE_INTERVAL_MINUTES", 0),
+		SessionRetentionDays:       envOrDefaultInt("SESSION_RETENTION_DAYS", 7),
+		S3Region:                   envOrDefault("S3_REGION", "us-east-1"),
+		S3Endpoint:                 os.Getenv("S3_ENDPOINT"),
+		S3AccessKey:                envOrDefault("S3_ACCESS_KEY", ""),
+		S3SecretKey:                envOrDefault("S3_SECRET_KEY", ""),
+		S3Bucket:                   envOrDefault("S3_BUCKET", ""),
+		ClusterPromoteMinSessions:  envOrDefaultInt("CLUSTER_PROMOTE_MIN_SESSIONS", 2),
 	}
 }
 
