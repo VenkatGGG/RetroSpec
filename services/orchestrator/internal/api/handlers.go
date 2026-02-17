@@ -24,6 +24,7 @@ import (
 type Handler struct {
 	artifactStore            artifacts.Store
 	replayProducer           queue.Producer
+	queueStatsProvider       queue.StatsProvider
 	corsAllowedOrigins       []string
 	adminAPIKey              string
 	internalAPIKey           string
@@ -77,6 +78,7 @@ func NewHandler(
 	return &Handler{
 		store:                    store,
 		replayProducer:           replayProducer,
+		queueStatsProvider:       queueStatsProvider,
 		artifactStore:            artifactStore,
 		corsAllowedOrigins:       corsAllowedOrigins,
 		adminAPIKey:              adminAPIKey,
@@ -122,6 +124,7 @@ func (h *Handler) Router() http.Handler {
 			r.With(h.requireAdminAccess).Post("/projects", h.createProject)
 			r.With(h.requireAdminAccess).Get("/projects/{projectID}/keys", h.listProjectAPIKeys)
 			r.With(h.requireAdminAccess).Post("/projects/{projectID}/keys", h.createProjectAPIKey)
+			r.With(h.requireAdminAccess).Get("/queue-health", h.getQueueHealth)
 		})
 		r.With(h.requireInternalAccess).Post("/internal/replay-results", h.reportReplayResult)
 		r.With(h.requireInternalAccess).Post("/internal/analysis-reports", h.reportAnalysisResult)
@@ -354,6 +357,49 @@ func (h *Handler) createProjectAPIKey(w http.ResponseWriter, r *http.Request) {
 		"projectId": stored.ProjectID,
 		"label":     stored.Label,
 		"apiKey":    rawKey,
+	})
+}
+
+func (h *Handler) getQueueHealth(w http.ResponseWriter, r *http.Request) {
+	if h.queueStatsProvider == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue stats provider unavailable"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 1200*time.Millisecond)
+	defer cancel()
+
+	stats, err := h.queueStatsProvider.QueueStats(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue stats unavailable"})
+		return
+	}
+
+	status := "healthy"
+	if stats.ReplayFailedDepth > 0 || stats.AnalysisFailedDepth > 0 {
+		status = "critical"
+	} else if stats.ReplayRetryDepth > 0 ||
+		stats.AnalysisRetryDepth > 0 ||
+		stats.ReplayPending > 0 ||
+		stats.AnalysisPending > 0 {
+		status = "warning"
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":      status,
+		"generatedAt": time.Now().UTC().Format(time.RFC3339),
+		"replay": map[string]int64{
+			"streamDepth": stats.ReplayStreamDepth,
+			"pending":     stats.ReplayPending,
+			"retryDepth":  stats.ReplayRetryDepth,
+			"failedDepth": stats.ReplayFailedDepth,
+		},
+		"analysis": map[string]int64{
+			"streamDepth": stats.AnalysisStreamDepth,
+			"pending":     stats.AnalysisPending,
+			"retryDepth":  stats.AnalysisRetryDepth,
+			"failedDepth": stats.AnalysisFailedDepth,
+		},
 	})
 }
 
