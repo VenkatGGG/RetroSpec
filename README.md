@@ -43,6 +43,7 @@ RetroSpec is an async web reliability platform that captures browser session eve
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/006_issue_cluster_states.sql`
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/007_issue_alert_events.sql`
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/008_error_markers_evidence.sql`
+   - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/009_issue_feedback_and_cluster_ops.sql`
 4. Start services:
    - `npm install`
    - `npx playwright install chromium` (required only if `REPLAY_RENDER_ENABLED=true`)
@@ -79,6 +80,7 @@ When video rendering fails, the worker still reports `analysis_json` and records
 API rate limiting is configurable with `RATE_LIMIT_REQUESTS_PER_SEC` and `RATE_LIMIT_BURST`.
 The orchestrator exposes Prometheus-style counters at `GET /metrics`.
 `/metrics` now also includes queue depth gauges for replay/analyzer stream, pending, retry, and dead-letter backlogs.
+Local Prometheus/Alertmanager configs are available under `infra/monitoring/` with queue and pipeline SLO alert rules.
 Optional background maintenance loops can be enabled with `AUTO_CLEANUP_INTERVAL_MINUTES` and `AUTO_PROMOTE_INTERVAL_MINUTES`.
 Ingest can auto-promote clusters immediately (`AUTO_PROMOTE_ON_INGEST=true`) so repeated issues appear without waiting for scheduled/manual promotion.
 Set `ALERT_WEBHOOK_URL` to send outbound notifications when clusters are promoted above confidence threshold.
@@ -88,6 +90,16 @@ Optionally enforce bucket-level object expiration with `S3_LIFECYCLE_ENABLED`, `
 Issue trend stats are available at `GET /v1/issues/stats?hours=24`.
 Session-level AI report cards are available on `GET /v1/sessions/{sessionID}` under `reportCard`.
 Report cards use statuses: `pending`, `ready`, `failed`, and `discarded` (low-confidence filtered).
+
+## E2E and Load Tests
+
+Run pipeline smoke validation against a live local stack:
+
+- `npm run test:e2e:pipeline`
+
+Run a basic upload+ingest load test:
+
+- `RETROSPEC_LOAD_TOTAL=200 RETROSPEC_LOAD_CONCURRENCY=20 npm run test:load:ingest`
 
 ## Website Integration (SDK)
 
