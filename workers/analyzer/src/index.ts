@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { Redis } from "ioredis";
 import { z } from "zod";
-import { analyzeSession } from "./analyze.js";
 import { loadConfig } from "./config.js";
+import { generateAnalysisReport } from "./model.js";
 import { reportAnalysisCard } from "./orchestrator.js";
 import { loadEventsBlob } from "./s3.js";
 
@@ -128,7 +128,7 @@ async function workerLoop() {
 
       const generatedAt = new Date();
       const rawEvents = await loadEventsBlob(parsed.eventsObjectKey);
-      const report = analyzeSession(parsed, rawEvents, generatedAt);
+      const report = await generateAnalysisReport(parsed, rawEvents, generatedAt, config);
       await reportAnalysisCard(config, report);
       await redis.set(doneKey, report.generatedAt, "EX", Math.max(60, config.dedupeWindowSec));
 
