@@ -231,6 +231,12 @@ func (p *Postgres) PromoteClusters(ctx context.Context, projectID string, minSes
 		    representative_session_id = EXCLUDED.representative_session_id,
 		    confidence = EXCLUDED.confidence,
 		    last_seen_at = EXCLUDED.last_seen_at
+		WHERE issue_clusters.symptom IS DISTINCT FROM EXCLUDED.symptom
+		   OR issue_clusters.session_count IS DISTINCT FROM EXCLUDED.session_count
+		   OR issue_clusters.user_count IS DISTINCT FROM EXCLUDED.user_count
+		   OR issue_clusters.representative_session_id IS DISTINCT FROM EXCLUDED.representative_session_id
+		   OR issue_clusters.confidence IS DISTINCT FROM EXCLUDED.confidence
+		   OR issue_clusters.last_seen_at IS DISTINCT FROM EXCLUDED.last_seen_at
 		RETURNING project_id, key, symptom, session_count, user_count, representative_session_id, confidence, last_seen_at, created_at`,
 		projectID,
 		minSessions,
