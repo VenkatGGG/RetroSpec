@@ -38,6 +38,9 @@ type Config struct {
 	S3AccessKey                string
 	S3SecretKey                string
 	S3Bucket                   string
+	S3LifecycleEnabled         bool
+	S3LifecycleExpirationDays  int
+	S3LifecyclePrefixes        []string
 	ClusterPromoteMinSessions  int
 }
 
@@ -76,6 +79,9 @@ func Load() Config {
 		S3AccessKey:                envOrDefault("S3_ACCESS_KEY", ""),
 		S3SecretKey:                envOrDefault("S3_SECRET_KEY", ""),
 		S3Bucket:                   envOrDefault("S3_BUCKET", ""),
+		S3LifecycleEnabled:         envOrDefaultBool("S3_LIFECYCLE_ENABLED", false),
+		S3LifecycleExpirationDays:  envOrDefaultInt("S3_LIFECYCLE_EXPIRATION_DAYS", 7),
+		S3LifecyclePrefixes:        parseLifecyclePrefixes(envOrDefault("S3_LIFECYCLE_PREFIXES", "session-events/,replay-artifacts/")),
 		ClusterPromoteMinSessions:  envOrDefaultInt("CLUSTER_PROMOTE_MIN_SESSIONS", 2),
 	}
 }
@@ -132,6 +138,22 @@ func parseCSV(value string) []string {
 		return []string{"*"}
 	}
 	return result
+}
+
+func parseLifecyclePrefixes(value string) []string {
+	items := strings.Split(value, ",")
+	prefixes := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		prefixes = append(prefixes, trimmed)
+	}
+	if len(prefixes) == 0 {
+		return []string{"session-events/", "replay-artifacts/"}
+	}
+	return prefixes
 }
 
 func envOrDefaultInt(key string, fallback int) int {

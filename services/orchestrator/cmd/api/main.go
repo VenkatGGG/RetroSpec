@@ -57,6 +57,31 @@ func main() {
 			log.Printf("artifact store unavailable (%v), continuing with noop store", err)
 			artifactStore = artifacts.NewNoopStore()
 		} else {
+			if cfg.S3LifecycleEnabled {
+				lifecycleCtx, cancelLifecycle := context.WithTimeout(ctx, 10*time.Second)
+				defer cancelLifecycle()
+
+				err := s3Store.EnsureLifecyclePolicy(
+					lifecycleCtx,
+					cfg.S3LifecycleExpirationDays,
+					cfg.S3LifecyclePrefixes,
+				)
+				if err != nil {
+					log.Printf(
+						"unable to apply s3 lifecycle policy bucket=%s days=%d err=%v",
+						cfg.S3Bucket,
+						cfg.S3LifecycleExpirationDays,
+						err,
+					)
+				} else {
+					log.Printf(
+						"applied s3 lifecycle policy bucket=%s days=%d prefixes=%v",
+						cfg.S3Bucket,
+						cfg.S3LifecycleExpirationDays,
+						cfg.S3LifecyclePrefixes,
+					)
+				}
+			}
 			artifactStore = s3Store
 		}
 	}

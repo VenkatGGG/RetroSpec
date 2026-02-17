@@ -16,6 +16,10 @@ type Store interface {
 	Close() error
 }
 
+type LifecycleConfigurer interface {
+	EnsureLifecyclePolicy(ctx context.Context, expirationDays int, prefixes []string) error
+}
+
 type NoopStore struct{}
 
 func NewNoopStore() *NoopStore {
@@ -40,4 +44,8 @@ func (s *NoopStore) DeleteObject(_ context.Context, _ string) error {
 
 func (s *NoopStore) Close() error {
 	return nil
+}
+
+func (s *NoopStore) EnsureLifecyclePolicy(_ context.Context, _ int, _ []string) error {
+	return ErrNotConfigured
 }

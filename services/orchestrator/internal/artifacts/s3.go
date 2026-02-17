@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsConfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type S3Store struct {
@@ -104,6 +106,81 @@ func (s *S3Store) DeleteObject(ctx context.Context, objectKey string) error {
 	return err
 }
 
+func (s *S3Store) EnsureLifecyclePolicy(
+	ctx context.Context,
+	expirationDays int,
+	prefixes []string,
+) error {
+	if expirationDays < 1 {
+		return fmt.Errorf("expirationDays must be >= 1")
+	}
+
+	normalizedPrefixes := normalizeLifecyclePrefixes(prefixes)
+	rules := make([]types.LifecycleRule, 0, len(normalizedPrefixes))
+	expireDays := int32(expirationDays)
+	abortDays := int32(1)
+	if expirationDays > 1 {
+		if expirationDays < 7 {
+			abortDays = int32(expirationDays)
+		} else {
+			abortDays = 7
+		}
+	}
+
+	for index, prefix := range normalizedPrefixes {
+		ruleID := fmt.Sprintf("retrospec-expire-%d", index+1)
+		filter := &types.LifecycleRuleFilter{}
+		if prefix != "" {
+			filter.Prefix = aws.String(prefix)
+		}
+
+		rules = append(rules, types.LifecycleRule{
+			ID:     aws.String(ruleID),
+			Status: types.ExpirationStatusEnabled,
+			Filter: filter,
+			Expiration: &types.LifecycleExpiration{
+				Days: aws.Int32(expireDays),
+			},
+			AbortIncompleteMultipartUpload: &types.AbortIncompleteMultipartUpload{
+				DaysAfterInitiation: aws.Int32(abortDays),
+			},
+		})
+	}
+
+	_, err := s.client.PutBucketLifecycleConfiguration(ctx, &s3.PutBucketLifecycleConfigurationInput{
+		Bucket: aws.String(s.bucket),
+		LifecycleConfiguration: &types.BucketLifecycleConfiguration{
+			Rules: rules,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("put bucket lifecycle configuration: %w", err)
+	}
+	return nil
+}
+
 func (s *S3Store) Close() error {
 	return nil
+}
+
+func normalizeLifecyclePrefixes(prefixes []string) []string {
+	if len(prefixes) == 0 {
+		return []string{""}
+	}
+
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		trimmed := strings.TrimSpace(prefix)
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+
+	if len(normalized) == 0 {
+		return []string{""}
+	}
+	return normalized
 }
