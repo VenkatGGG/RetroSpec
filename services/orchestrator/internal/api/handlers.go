@@ -971,11 +971,23 @@ func buildAnalysisJob(session store.Session) (queue.AnalysisJob, bool) {
 	}
 
 	offsets := make([]int, 0, len(session.Markers))
+	hints := make([]string, 0, len(session.Markers))
 	triggerKind := "ui_no_effect"
 
 	for _, marker := range session.Markers {
 		offsets = append(offsets, marker.ReplayOffsetMs)
 		triggerKind = strongerTrigger(triggerKind, marker.Kind)
+		hint := strings.TrimSpace(marker.Label)
+		if evidence := strings.TrimSpace(marker.Evidence); evidence != "" {
+			if hint != "" {
+				hint = hint + " | " + evidence
+			} else {
+				hint = evidence
+			}
+		}
+		if hint != "" {
+			hints = append(hints, truncateString(hint, 220))
+		}
 	}
 
 	return queue.AnalysisJob{
@@ -983,6 +995,7 @@ func buildAnalysisJob(session store.Session) (queue.AnalysisJob, bool) {
 		SessionID:       session.ID,
 		EventsObjectKey: session.EventsObjectKey,
 		MarkerOffsetsMs: offsets,
+		MarkerHints:     hints,
 		TriggerKind:     triggerKind,
 		Route:           session.Route,
 		Site:            session.Site,
@@ -1148,4 +1161,11 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func truncateString(value string, maxLen int) string {
+	if maxLen <= 0 || len(value) <= maxLen {
+		return value
+	}
+	return value[:maxLen]
 }

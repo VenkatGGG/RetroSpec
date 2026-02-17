@@ -11,6 +11,7 @@ const analysisJobSchema = z.object({
   sessionId: z.string().min(1),
   eventsObjectKey: z.string().min(1),
   markerOffsetsMs: z.array(z.number().int().nonnegative()).min(1),
+  markerHints: z.array(z.string().trim().max(240)).default([]),
   triggerKind: z.enum(["api_error", "js_exception", "validation_failed", "ui_no_effect"]),
   route: z.string().default("/unknown"),
   site: z.string().default("unknown-site"),
@@ -41,6 +42,7 @@ function jobFingerprint(parsed: z.infer<typeof analysisJobSchema>): string {
         parsed.triggerKind,
         parsed.route,
         parsed.site,
+        parsed.markerHints.join("||"),
         parsed.markerOffsetsMs.join(","),
       ].join("|"),
     )

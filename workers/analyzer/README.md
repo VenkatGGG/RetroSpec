@@ -5,6 +5,7 @@ Async worker that consumes `analysis-jobs` from Redis and writes per-session rep
 ## Current Behavior
 
 - Reads rrweb event JSON from S3-compatible storage.
+- Receives marker hint context (label + evidence) from orchestrator jobs and uses it during report generation.
 - Supports provider modes:
   - `heuristic`: deterministic report generation.
   - `dual_http`: calls separate text and visual model endpoints and merges both paths.

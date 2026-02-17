@@ -193,7 +193,8 @@ export function analyzeSession(
   const lastOffset = markerCount > 0 ? offsets[markerCount - 1] : 0;
 
   const nearbyEvents = eventsNearMarkers(events, offsets);
-  const searchText = stringifySlice(nearbyEvents).slice(0, 40_000);
+  const markerHintsText = (job.markerHints ?? []).join(" | ").toLowerCase();
+  const searchText = `${stringifySlice(nearbyEvents).slice(0, 40_000)} ${markerHintsText}`.trim();
   const hints = inferSignalHints(job.triggerKind, searchText);
 
   let confidence = baseConfidence[job.triggerKind] + hints.confidenceBoost;
@@ -208,6 +209,7 @@ export function analyzeSession(
   const textSummary = [
     `Events scanned: ${events.length}.`,
     `Markers: ${markerCount} (${firstOffset}ms to ${lastOffset}ms).`,
+    markerHintsText ? `Marker hints: ${markerHintsText.slice(0, 220)}.` : "",
     hints.textFinding,
   ].join(" ");
   const visualSummary = [

@@ -11,13 +11,14 @@ type ReplayJob struct {
 }
 
 type AnalysisJob struct {
-	ProjectID       string `json:"projectId"`
-	SessionID       string `json:"sessionId"`
-	EventsObjectKey string `json:"eventsObjectKey"`
-	MarkerOffsetsMs []int  `json:"markerOffsetsMs"`
-	TriggerKind     string `json:"triggerKind"`
-	Route           string `json:"route"`
-	Site            string `json:"site"`
+	ProjectID       string   `json:"projectId"`
+	SessionID       string   `json:"sessionId"`
+	EventsObjectKey string   `json:"eventsObjectKey"`
+	MarkerOffsetsMs []int    `json:"markerOffsetsMs"`
+	MarkerHints     []string `json:"markerHints"`
+	TriggerKind     string   `json:"triggerKind"`
+	Route           string   `json:"route"`
+	Site            string   `json:"site"`
 }
 
 type Producer interface {

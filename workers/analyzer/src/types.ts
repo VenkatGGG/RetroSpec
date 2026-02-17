@@ -9,6 +9,7 @@ export interface AnalysisJobData {
   sessionId: string;
   eventsObjectKey: string;
   markerOffsetsMs: number[];
+  markerHints: string[];
   triggerKind: TriggerKind;
   route: string;
   site: string;

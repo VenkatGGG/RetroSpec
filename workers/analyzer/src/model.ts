@@ -204,6 +204,7 @@ async function postModelRequest(
         route: job.route,
         triggerKind: job.triggerKind,
         markerOffsetsMs: job.markerOffsetsMs,
+        markerHints: (job.markerHints ?? []).slice(0, 20),
         eventCount,
         eventsSample: sampledPayload,
       }),
