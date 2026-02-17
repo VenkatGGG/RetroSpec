@@ -36,6 +36,7 @@ type Handler struct {
 	artifactTokenSecret      string
 	artifactTokenTTL         time.Duration
 	sessionRetentionDays     int
+	alertNotifier            *issueAlertNotifier
 }
 
 type requestContextKey string
@@ -58,6 +59,10 @@ func NewHandler(
 	autoPromoteOnIngest bool,
 	rateLimitRequestsPerSec float64,
 	rateLimitBurst int,
+	alertWebhookURL string,
+	alertAuthHeader string,
+	alertMinConfidence float64,
+	alertCooldownMinutes int,
 	artifactTokenSecret string,
 	artifactTokenTTLSeconds int,
 	sessionRetentionDays int,
@@ -81,6 +86,7 @@ func NewHandler(
 		artifactTokenSecret:  strings.TrimSpace(artifactTokenSecret),
 		artifactTokenTTL:     time.Duration(maxInt(60, artifactTokenTTLSeconds)) * time.Second,
 		sessionRetentionDays: sessionRetentionDays,
+		alertNotifier:        newIssueAlertNotifier(store, alertWebhookURL, alertAuthHeader, alertMinConfidence, alertCooldownMinutes),
 	}
 }
 
@@ -194,6 +200,8 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 	h.metrics.ingestSessionsTotal.Add(1)
 	promotedCount := 0
 	promoteError := ""
+	alertsSent := 0
+	alertErrors := 0
 	if h.autoPromoteOnIngest {
 		promoted, err := h.store.PromoteClusters(r.Context(), stored.ProjectID, h.clusterPromoteMinSession)
 		if err != nil {
@@ -201,6 +209,7 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 			log.Printf("auto-promote on ingest failed session=%s project=%s err=%v", stored.ID, stored.ProjectID, err)
 		} else {
 			promotedCount = len(promoted.Promoted)
+			alertsSent, alertErrors = h.dispatchPromotedIssueAlerts(r.Context(), promoted.Promoted, "ingest_auto_promote")
 		}
 	}
 
@@ -210,6 +219,8 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 		"analysisQueueError": analysisQueueError,
 		"promotedCount":      promotedCount,
 		"promoteError":       promoteError,
+		"alertsSent":         alertsSent,
+		"alertErrors":        alertErrors,
 	})
 }
 
@@ -500,7 +511,12 @@ func (h *Handler) promoteIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	alertsSent, alertErrors := h.dispatchPromotedIssueAlerts(r.Context(), result.Promoted, "manual_promote")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"promoted":    result.Promoted,
+		"alertsSent":  alertsSent,
+		"alertErrors": alertErrors,
+	})
 }
 
 func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
@@ -855,6 +871,34 @@ func findArtifactByType(artifacts []store.SessionArtifact, artifactType string) 
 		}
 	}
 	return store.SessionArtifact{}, false
+}
+
+func (h *Handler) dispatchPromotedIssueAlerts(
+	ctx context.Context,
+	clusters []store.IssueCluster,
+	trigger string,
+) (int, int) {
+	if h.alertNotifier == nil || !h.alertNotifier.enabled() || len(clusters) == 0 {
+		return 0, 0
+	}
+
+	sent := 0
+	errorsCount := 0
+	for _, cluster := range clusters {
+		delivered, err := h.alertNotifier.notifyClusterPromoted(ctx, cluster, trigger)
+		if err != nil {
+			errorsCount++
+			h.metrics.alertErrorsTotal.Add(1)
+			log.Printf("issue alert failed project=%s cluster=%s trigger=%s err=%v", cluster.ProjectID, cluster.Key, trigger, err)
+			continue
+		}
+		if delivered {
+			sent++
+			h.metrics.alertSentTotal.Add(1)
+		}
+	}
+
+	return sent, errorsCount
 }
 
 func buildReplayJob(session store.Session) (queue.ReplayJob, bool) {

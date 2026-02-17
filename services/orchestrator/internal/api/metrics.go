@@ -17,6 +17,8 @@ type apiMetrics struct {
 	cleanupRunsTotal            atomic.Int64
 	cleanupEventObjectsTotal    atomic.Int64
 	cleanupArtifactObjectsTotal atomic.Int64
+	alertSentTotal              atomic.Int64
+	alertErrorsTotal            atomic.Int64
 	rateLimitedTotal            atomic.Int64
 }
 
@@ -66,6 +68,14 @@ func (m *apiMetrics) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(w, "# HELP retrospec_cleanup_artifact_objects_total Replay artifact objects deleted by cleanup.\n")
 	_, _ = fmt.Fprintf(w, "# TYPE retrospec_cleanup_artifact_objects_total counter\n")
 	_, _ = fmt.Fprintf(w, "retrospec_cleanup_artifact_objects_total %d\n", m.cleanupArtifactObjectsTotal.Load())
+
+	_, _ = fmt.Fprintf(w, "# HELP retrospec_alert_sent_total Outbound issue alerts successfully sent.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE retrospec_alert_sent_total counter\n")
+	_, _ = fmt.Fprintf(w, "retrospec_alert_sent_total %d\n", m.alertSentTotal.Load())
+
+	_, _ = fmt.Fprintf(w, "# HELP retrospec_alert_errors_total Outbound issue alert send failures.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE retrospec_alert_errors_total counter\n")
+	_, _ = fmt.Fprintf(w, "retrospec_alert_errors_total %d\n", m.alertErrorsTotal.Load())
 
 	_, _ = fmt.Fprintf(w, "# HELP retrospec_rate_limited_total Requests rejected due to rate limiting.\n")
 	_, _ = fmt.Fprintf(w, "# TYPE retrospec_rate_limited_total counter\n")

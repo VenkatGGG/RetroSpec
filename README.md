@@ -38,6 +38,8 @@ RetroSpec is an async web reliability platform that captures browser session eve
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/003_projects_and_project_api_keys.sql`
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/004_session_artifacts.sql`
    - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/005_session_report_cards.sql`
+   - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/006_issue_cluster_states.sql`
+   - `psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f services/orchestrator/db/migrations/007_issue_alert_events.sql`
 4. Start services:
    - `npm install`
    - `npx playwright install chromium` (required only if `REPLAY_RENDER_ENABLED=true`)
@@ -72,6 +74,8 @@ API rate limiting is configurable with `RATE_LIMIT_REQUESTS_PER_SEC` and `RATE_L
 The orchestrator exposes Prometheus-style counters at `GET /metrics`.
 Optional background maintenance loops can be enabled with `AUTO_CLEANUP_INTERVAL_MINUTES` and `AUTO_PROMOTE_INTERVAL_MINUTES`.
 Ingest can auto-promote clusters immediately (`AUTO_PROMOTE_ON_INGEST=true`) so repeated issues appear without waiting for scheduled/manual promotion.
+Set `ALERT_WEBHOOK_URL` to send outbound notifications when clusters are promoted above confidence threshold.
+Use `ALERT_AUTH_HEADER`, `ALERT_COOLDOWN_MINUTES`, and `ALERT_MIN_CLUSTER_CONFIDENCE` to control alert auth, dedupe window, and noise floor.
 Issue trend stats are available at `GET /v1/issues/stats?hours=24`.
 Session-level AI report cards are available on `GET /v1/sessions/{sessionID}` under `reportCard`.
 Report cards use statuses: `pending`, `ready`, `failed`, and `discarded` (low-confidence filtered).

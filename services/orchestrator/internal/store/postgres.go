@@ -416,6 +416,80 @@ func (p *Postgres) IssueClusterExists(
 	return exists, nil
 }
 
+func (p *Postgres) LastIssueAlertAt(
+	ctx context.Context,
+	projectID string,
+	clusterKey string,
+	alertType string,
+) (*time.Time, error) {
+	projectID = normalizeProjectID(projectID)
+	clusterKey = strings.TrimSpace(clusterKey)
+	alertType = strings.TrimSpace(alertType)
+	if clusterKey == "" || alertType == "" {
+		return nil, nil
+	}
+
+	var sentAt time.Time
+	err := p.pool.QueryRow(
+		ctx,
+		`SELECT sent_at
+		 FROM issue_alert_events
+		 WHERE project_id = $1
+		   AND cluster_key = $2
+		   AND alert_type = $3
+		 ORDER BY sent_at DESC
+		 LIMIT 1`,
+		projectID,
+		clusterKey,
+		alertType,
+	).Scan(&sentAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &sentAt, nil
+}
+
+func (p *Postgres) RecordIssueAlert(
+	ctx context.Context,
+	projectID string,
+	clusterKey string,
+	alertType string,
+	payload any,
+	sentAt time.Time,
+) error {
+	projectID = normalizeProjectID(projectID)
+	clusterKey = strings.TrimSpace(clusterKey)
+	alertType = strings.TrimSpace(alertType)
+	if clusterKey == "" || alertType == "" {
+		return fmt.Errorf("clusterKey and alertType are required")
+	}
+	if sentAt.IsZero() {
+		sentAt = time.Now().UTC()
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	_, err = p.pool.Exec(
+		ctx,
+		`INSERT INTO issue_alert_events (id, project_id, cluster_key, alert_type, payload, sent_at)
+		 VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+		"alert_"+uuid.NewString(),
+		projectID,
+		clusterKey,
+		alertType,
+		string(payloadJSON),
+		sentAt,
+	)
+	return err
+}
+
 func (p *Postgres) ListIssueClusterSessions(
 	ctx context.Context,
 	projectID string,

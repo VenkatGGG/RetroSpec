@@ -14,6 +14,7 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 - `POST /v1/artifacts/session-events`
 - `POST /v1/ingest/session`
 - `POST /v1/issues/promote`
+- `POST /v1/issues/{clusterKey}/state`
 - `GET /v1/issues`
 - `GET /v1/issues/{clusterKey}/sessions`
 - `GET /v1/sessions/{sessionID}`
@@ -28,6 +29,8 @@ Go API service for ingesting session/event metadata, promoting repeated failures
 4. Apply SQL in `db/migrations/003_projects_and_project_api_keys.sql`.
 5. Apply SQL in `db/migrations/004_session_artifacts.sql`.
 6. Apply SQL in `db/migrations/005_session_report_cards.sql`.
+7. Apply SQL in `db/migrations/006_issue_cluster_states.sql`.
+8. Apply SQL in `db/migrations/007_issue_alert_events.sql`.
 5. Start API:
 
 ```bash
@@ -41,6 +44,8 @@ go run ./cmd/api
 - `POST /v1/ingest/session` can auto-promote clusters immediately when `AUTO_PROMOTE_ON_INGEST=true`.
 - `GET /v1/issues/{clusterKey}/sessions` returns the recent sessions mapped to a promoted cluster key, including report-card status/confidence.
   - Query params: `limit` (1-200), `reportStatus` (`pending|ready|failed|discarded`), `minConfidence` (0-1).
+- `POST /v1/issues/{clusterKey}/state` updates triage workflow state (`open|acknowledged|resolved|muted`) with assignee, note, and optional mute window.
+- Configure outbound alerts with `ALERT_WEBHOOK_URL` (optional), plus `ALERT_AUTH_HEADER`, `ALERT_COOLDOWN_MINUTES`, and `ALERT_MIN_CLUSTER_CONFIDENCE`.
 - `POST /v1/artifacts/session-events` stores rrweb event JSON and returns `eventsObjectKey` for session ingest.
 - Session event payloads are loaded from S3-compatible storage via the configured `S3_*` environment variables.
 - Internal worker callbacks (`/v1/internal/*`) require `INTERNAL_API_KEY` via `X-Retrospec-Internal`.
