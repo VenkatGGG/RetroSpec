@@ -1,5 +1,5 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
-import type { IssueCluster, SessionSummary } from "../sessions/types";
+import type { IssueCluster, IssueKindStat, SessionSummary } from "../sessions/types";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const ingestApiKey = import.meta.env.VITE_INGEST_API_KEY;
@@ -31,6 +31,12 @@ export const reportingApi = createApi({
               { type: "Issue" as const, id: "LIST" },
             ]
           : [{ type: "Issue" as const, id: "LIST" }],
+    }),
+    getIssueStats: builder.query<{ lookbackHours: number; stats: IssueKindStat[] }, number | void>({
+      query: (hours) =>
+        typeof hours === "number" ? `/v1/issues/stats?hours=${hours}` : "/v1/issues/stats",
+      transformResponse: (response: { lookbackHours: number; stats: IssueKindStat[] }) => response,
+      providesTags: [{ type: "Issue", id: "STATS" }],
     }),
     getSession: builder.query<SessionSummary, string>({
       query: (sessionId) => `/v1/sessions/${sessionId}`,
@@ -145,6 +151,7 @@ export const reportingApi = createApi({
 
 export const {
   useGetIssuesQuery,
+  useGetIssueStatsQuery,
   useGetSessionQuery,
   useGetSessionEventsQuery,
   useGetSessionArtifactTokenQuery,

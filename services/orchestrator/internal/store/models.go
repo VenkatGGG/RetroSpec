@@ -37,6 +37,14 @@ type IssueCluster struct {
 	CreatedAt               time.Time `json:"createdAt"`
 }
 
+type IssueKindStat struct {
+	Kind         string    `json:"kind"`
+	MarkerCount  int       `json:"markerCount"`
+	SessionCount int       `json:"sessionCount"`
+	ClusterCount int       `json:"clusterCount"`
+	LastSeenAt   time.Time `json:"lastSeenAt"`
+}
+
 type IngestPayload struct {
 	Session SessionInput       `json:"session"`
 	Markers []ErrorMarkerInput `json:"markers"`

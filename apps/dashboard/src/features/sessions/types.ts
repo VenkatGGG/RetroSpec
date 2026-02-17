@@ -53,6 +53,14 @@ export interface IssueCluster {
   representativeSessionId: string;
 }
 
+export interface IssueKindStat {
+  kind: string;
+  markerCount: number;
+  sessionCount: number;
+  clusterCount: number;
+  lastSeenAt: string;
+}
+
 export interface SessionsState {
   activeMarkerId: string | null;
 }

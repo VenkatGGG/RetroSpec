@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   useCleanupDataMutation,
   useGetIssuesQuery,
+  useGetIssueStatsQuery,
   usePromoteIssuesMutation,
 } from "../features/reporting/reportingApi";
 
@@ -13,6 +14,7 @@ export function IssueClustersPage() {
     isFetching,
     isError,
   } = useGetIssuesQuery();
+  const { data: issueStats } = useGetIssueStatsQuery(24);
   const [promoteIssues, { isLoading: isPromoting }] = usePromoteIssuesMutation();
   const [cleanupData, { isLoading: isCleaning }] = useCleanupDataMutation();
   const [maintenanceMessage, setMaintenanceMessage] = useState<string>("");
@@ -49,6 +51,27 @@ export function IssueClustersPage() {
         {isFetching && <span>Refreshing...</span>}
       </div>
       {maintenanceMessage && <p>{maintenanceMessage}</p>}
+      {issueStats && issueStats.stats.length > 0 && (
+        <section className="stats-grid">
+          {issueStats.stats.map((stat) => (
+            <article className="stats-card" key={stat.kind}>
+              <h3>{stat.kind}</h3>
+              <p>
+                <strong>Markers:</strong> {stat.markerCount}
+              </p>
+              <p>
+                <strong>Sessions:</strong> {stat.sessionCount}
+              </p>
+              <p>
+                <strong>Clusters:</strong> {stat.clusterCount}
+              </p>
+              <p>
+                <strong>Last Seen:</strong> {new Date(stat.lastSeenAt).toLocaleString()}
+              </p>
+            </article>
+          ))}
+        </section>
+      )}
       {isLoading && <p>Loading issue clusters...</p>}
       {isError && <p>Unable to load issues. Check API connectivity.</p>}
       {!isLoading && !isError && clusters.length === 0 && (

@@ -303,6 +303,56 @@ func (p *Postgres) ListIssueClusters(ctx context.Context, projectID string) ([]I
 	return clusters, nil
 }
 
+func (p *Postgres) ListIssueKindStats(ctx context.Context, projectID string, lookback time.Duration) ([]IssueKindStat, error) {
+	projectID = normalizeProjectID(projectID)
+	if lookback <= 0 {
+		lookback = 24 * time.Hour
+	}
+	lookbackSeconds := int(lookback.Seconds())
+
+	rows, err := p.pool.Query(
+		ctx,
+		`SELECT
+		   em.kind,
+		   COUNT(*)::int AS marker_count,
+		   COUNT(DISTINCT em.session_id)::int AS session_count,
+		   COUNT(DISTINCT em.cluster_key)::int AS cluster_count,
+		   MAX(em.observed_at) AS last_seen_at
+		 FROM error_markers em
+		 JOIN sessions s ON s.id = em.session_id
+		 WHERE s.project_id = $1
+		   AND em.observed_at >= NOW() - ($2::int * interval '1 second')
+		 GROUP BY em.kind
+		 ORDER BY marker_count DESC, last_seen_at DESC`,
+		projectID,
+		lookbackSeconds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	stats := make([]IssueKindStat, 0)
+	for rows.Next() {
+		var stat IssueKindStat
+		if err := rows.Scan(
+			&stat.Kind,
+			&stat.MarkerCount,
+			&stat.SessionCount,
+			&stat.ClusterCount,
+			&stat.LastSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		stats = append(stats, stat)
+	}
+	if rows.Err() != nil {
+		return nil, rows.Err()
+	}
+
+	return stats, nil
+}
+
 func (p *Postgres) GetSession(ctx context.Context, projectID, id string) (Session, error) {
 	projectID = normalizeProjectID(projectID)
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,6 +118,7 @@ func (h *Handler) Router() http.Handler {
 			r.With(h.requireWriteAccess).Post("/artifacts/session-events", h.uploadSessionEvents)
 			r.With(h.requireWriteAccess).Post("/ingest/session", h.ingestSession)
 			r.With(h.requireWriteAccess).Post("/issues/promote", h.promoteIssues)
+			r.Get("/issues/stats", h.listIssueStats)
 			r.Get("/issues", h.listIssues)
 			r.Get("/sessions/{sessionID}", h.getSession)
 			r.Get("/sessions/{sessionID}/events", h.getSessionEvents)
@@ -384,6 +386,30 @@ func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"issues": clusters})
+}
+
+func (h *Handler) listIssueStats(w http.ResponseWriter, r *http.Request) {
+	lookbackHours := 24
+	if candidate := strings.TrimSpace(r.URL.Query().Get("hours")); candidate != "" {
+		parsed, err := strconv.Atoi(candidate)
+		if err != nil || parsed < 1 || parsed > 24*30 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hours must be an integer between 1 and 720"})
+			return
+		}
+		lookbackHours = parsed
+	}
+
+	projectID := h.projectIDFromContext(r.Context())
+	stats, err := h.store.ListIssueKindStats(r.Context(), projectID, time.Duration(lookbackHours)*time.Hour)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats lookup failed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"lookbackHours": lookbackHours,
+		"stats":         stats,
+	})
 }
 
 func (h *Handler) cleanupExpiredData(w http.ResponseWriter, r *http.Request) {
