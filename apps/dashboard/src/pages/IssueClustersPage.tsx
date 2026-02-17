@@ -8,13 +8,14 @@ import {
 } from "../features/reporting/reportingApi";
 
 export function IssueClustersPage() {
+  const [lookbackHours, setLookbackHours] = useState(24);
   const {
     data: clusters = [],
     isLoading,
     isFetching,
     isError,
   } = useGetIssuesQuery();
-  const { data: issueStats } = useGetIssueStatsQuery(24);
+  const { data: issueStats } = useGetIssueStatsQuery(lookbackHours);
   const [promoteIssues, { isLoading: isPromoting }] = usePromoteIssuesMutation();
   const [cleanupData, { isLoading: isCleaning }] = useCleanupDataMutation();
   const [maintenanceMessage, setMaintenanceMessage] = useState<string>("");
@@ -42,6 +43,16 @@ export function IssueClustersPage() {
         <Link to="/admin">Open admin controls</Link>
       </p>
       <div className="issue-actions">
+        <label htmlFor="stats-window-select">Stats Window</label>
+        <select
+          id="stats-window-select"
+          value={lookbackHours}
+          onChange={(event) => setLookbackHours(Number(event.target.value))}
+        >
+          <option value={24}>24h</option>
+          <option value={72}>72h</option>
+          <option value={168}>7d</option>
+        </select>
         <button type="button" onClick={handlePromote} disabled={isPromoting}>
           {isPromoting ? "Promoting..." : "Recompute Clusters"}
         </button>
