@@ -4,6 +4,8 @@ export interface ReplayJobData {
   eventsObjectKey: string;
   markerOffsetsMs: number[];
   triggerKind: "api_error" | "js_exception" | "validation_failed" | "ui_no_effect";
+  route: string;
+  site: string;
   attempt?: number;
 }
 
@@ -31,4 +33,26 @@ export interface ReplayArtifactReport {
   status: "ready" | "failed" | "skipped";
   generatedAt: string;
   windows: MarkerWindow[];
+}
+
+export interface VisualModelVerdict {
+  confirmed: boolean;
+  confidence: number;
+  summary: string;
+  symptom?: string;
+  technicalRootCause?: string;
+  suggestedFix?: string;
+}
+
+export interface AnalysisReportUpdate {
+  projectId: string;
+  sessionId: string;
+  status: "pending" | "ready" | "failed" | "discarded";
+  symptom?: string;
+  technicalRootCause?: string;
+  suggestedFix?: string;
+  textSummary?: string;
+  visualSummary?: string;
+  confidence?: number;
+  generatedAt: string;
 }

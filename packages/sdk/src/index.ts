@@ -31,6 +31,24 @@ const DEFAULTS = {
   rageClickWindowMs: 1_200,
   reloadLoopThreshold: 3,
   reloadLoopWindowMs: 15_000,
+  maskAllInputs: true,
+  maskInputOptions: {
+    color: true,
+    date: true,
+    datetimeLocal: true,
+    email: true,
+    month: true,
+    number: true,
+    password: true,
+    range: true,
+    search: true,
+    tel: true,
+    text: true,
+    textarea: true,
+    time: true,
+    url: true,
+    week: true,
+  },
   debug: false,
 };
 
@@ -55,14 +73,18 @@ export function initRetrospec(options: RetrospecInitOptions): RetrospecClient {
     lastFlushedEventTimestamp: 0,
   };
 
-  const stopRecording = record({
-    emit(event) {
-      state.events.push(event);
-      if (state.events.length > config.maxEvents) {
-        state.events.splice(0, state.events.length - config.maxEvents);
-      }
-    },
-  });
+  const stopRecording = record(
+    {
+      maskAllInputs: config.maskAllInputs,
+      maskInputOptions: config.maskInputOptions,
+      emit(event) {
+        state.events.push(event as eventWithTime);
+        if (state.events.length > config.maxEvents) {
+          state.events.splice(0, state.events.length - config.maxEvents);
+        }
+      },
+    } as Parameters<typeof record>[0],
+  );
 
   const cleanupFns: Array<() => void> = [];
   cleanupFns.push(instrumentJSErrors(state));

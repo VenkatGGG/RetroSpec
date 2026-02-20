@@ -25,26 +25,16 @@ type Handler struct {
 	artifactStore            artifacts.Store
 	replayProducer           queue.Producer
 	queueStatsProvider       queue.StatsProvider
-	queueRedriver            queue.DeadLetterRedriver
-	queueDeadLetterInspector queue.DeadLetterInspector
-	queueDeadLetterPurger    queue.DeadLetterPurger
 	corsAllowedOrigins       []string
 	internalAPIKey           string
 	ingestAPIKey             string
 	store                    *store.Postgres
 	clusterPromoteMinSession int
-	autoPromoteOnIngest      bool
 	rateLimiter              *apiRateLimiter
 	metrics                  *apiMetrics
 	artifactTokenSecret      string
 	artifactTokenTTL         time.Duration
 	sessionRetentionDays     int
-	alertNotifier            *issueAlertNotifier
-	queueWarningPending      int
-	queueWarningRetry        int
-	queueCriticalPending     int
-	queueCriticalRetry       int
-	queueCriticalFailed      int
 }
 
 type requestContextKey string
@@ -63,18 +53,8 @@ func NewHandler(
 	internalAPIKey string,
 	ingestAPIKey string,
 	clusterPromoteMinSession int,
-	autoPromoteOnIngest bool,
 	rateLimitRequestsPerSec float64,
 	rateLimitBurst int,
-	alertWebhookURL string,
-	alertAuthHeader string,
-	alertMinConfidence float64,
-	alertCooldownMinutes int,
-	queueWarningPending int,
-	queueWarningRetry int,
-	queueCriticalPending int,
-	queueCriticalRetry int,
-	queueCriticalFailed int,
 	artifactTokenSecret string,
 	artifactTokenTTLSeconds int,
 	sessionRetentionDays int,
@@ -83,18 +63,6 @@ func NewHandler(
 	if provider, ok := replayProducer.(queue.StatsProvider); ok {
 		queueStatsProvider = provider
 	}
-	var queueRedriver queue.DeadLetterRedriver
-	if provider, ok := replayProducer.(queue.DeadLetterRedriver); ok {
-		queueRedriver = provider
-	}
-	var queueDeadLetterInspector queue.DeadLetterInspector
-	if provider, ok := replayProducer.(queue.DeadLetterInspector); ok {
-		queueDeadLetterInspector = provider
-	}
-	var queueDeadLetterPurger queue.DeadLetterPurger
-	if provider, ok := replayProducer.(queue.DeadLetterPurger); ok {
-		queueDeadLetterPurger = provider
-	}
 
 	metrics := newAPIMetrics(queueStatsProvider)
 
@@ -102,15 +70,11 @@ func NewHandler(
 		store:                    store,
 		replayProducer:           replayProducer,
 		queueStatsProvider:       queueStatsProvider,
-		queueRedriver:            queueRedriver,
-		queueDeadLetterInspector: queueDeadLetterInspector,
-		queueDeadLetterPurger:    queueDeadLetterPurger,
 		artifactStore:            artifactStore,
 		corsAllowedOrigins:       corsAllowedOrigins,
 		internalAPIKey:           internalAPIKey,
 		ingestAPIKey:             ingestAPIKey,
 		clusterPromoteMinSession: clusterPromoteMinSession,
-		autoPromoteOnIngest:      autoPromoteOnIngest,
 		rateLimiter: newAPIRateLimiter(rateLimitRequestsPerSec, rateLimitBurst, func() {
 			metrics.rateLimitedTotal.Add(1)
 		}),
@@ -118,12 +82,6 @@ func NewHandler(
 		artifactTokenSecret:  strings.TrimSpace(artifactTokenSecret),
 		artifactTokenTTL:     time.Duration(maxInt(60, artifactTokenTTLSeconds)) * time.Second,
 		sessionRetentionDays: sessionRetentionDays,
-		alertNotifier:        newIssueAlertNotifier(store, alertWebhookURL, alertAuthHeader, alertMinConfidence, alertCooldownMinutes),
-		queueWarningPending:  maxInt(0, queueWarningPending),
-		queueWarningRetry:    maxInt(0, queueWarningRetry),
-		queueCriticalPending: maxInt(0, queueCriticalPending),
-		queueCriticalRetry:   maxInt(0, queueCriticalRetry),
-		queueCriticalFailed:  maxInt(1, queueCriticalFailed),
 	}
 }
 
@@ -194,14 +152,6 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	queueError := ""
-	if job, ok := buildReplayJob(stored); ok {
-		if err := h.replayProducer.EnqueueReplayJob(r.Context(), job); err != nil {
-			queueError = err.Error()
-			h.metrics.replayQueueErrorsTotal.Add(1)
-			log.Printf("replay job enqueue failed session=%s err=%v", stored.ID, err)
-		}
-	}
 	analysisQueueError := ""
 	if job, ok := buildAnalysisJob(stored); ok {
 		if _, err := h.store.UpsertSessionReportCard(
@@ -228,24 +178,10 @@ func (h *Handler) ingestSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.metrics.ingestSessionsTotal.Add(1)
-	promotedCount := 0
-	promoteError := ""
-	if h.autoPromoteOnIngest {
-		promoted, err := h.store.PromoteClusters(r.Context(), stored.ProjectID, h.clusterPromoteMinSession)
-		if err != nil {
-			promoteError = err.Error()
-			log.Printf("auto-promote on ingest failed session=%s project=%s err=%v", stored.ID, stored.ProjectID, err)
-		} else {
-			promotedCount = len(promoted.Promoted)
-		}
-	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"session":            stored,
-		"queueError":         queueError,
 		"analysisQueueError": analysisQueueError,
-		"promotedCount":      promotedCount,
-		"promoteError":       promoteError,
 	})
 }
 
@@ -253,58 +189,6 @@ type uploadSessionEventsRequest struct {
 	SessionID string          `json:"sessionId"`
 	Site      string          `json:"site"`
 	Events    json.RawMessage `json:"events"`
-}
-
-type createProjectRequest struct {
-	Name  string `json:"name"`
-	Site  string `json:"site"`
-	Label string `json:"label"`
-}
-
-func (h *Handler) listProjects(w http.ResponseWriter, r *http.Request) {
-	projects, err := h.store.ListProjects(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "projects lookup failed"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"projects": projects})
-}
-
-func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
-	payload := createProjectRequest{}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
-		return
-	}
-
-	name := strings.TrimSpace(payload.Name)
-	site := strings.TrimSpace(payload.Site)
-	label := strings.TrimSpace(payload.Label)
-	if name == "" || site == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and site are required"})
-		return
-	}
-
-	if label == "" {
-		label = "default-key"
-	}
-
-	rawKey := generateRawAPIKey()
-	project, err := h.store.CreateProjectWithAPIKey(r.Context(), name, site, label, rawKey)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "project creation failed"})
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"project": project,
-		"apiKey":  rawKey,
-	})
-}
-
-type createProjectAPIKeyRequest struct {
-	Label string `json:"label"`
 }
 
 type reportReplayResultRequest struct {
@@ -319,339 +203,16 @@ type reportReplayResultRequest struct {
 }
 
 type reportAnalysisResultRequest struct {
-	ProjectID          string  `json:"projectId"`
-	SessionID          string  `json:"sessionId"`
-	Status             string  `json:"status"`
-	Symptom            string  `json:"symptom"`
-	TechnicalRootCause string  `json:"technicalRootCause"`
-	SuggestedFix       string  `json:"suggestedFix"`
-	TextSummary        string  `json:"textSummary"`
-	VisualSummary      string  `json:"visualSummary"`
-	Confidence         float64 `json:"confidence"`
-	GeneratedAt        string  `json:"generatedAt"`
-}
-
-type updateIssueStateRequest struct {
-	State      string `json:"state"`
-	Assignee   string `json:"assignee"`
-	MutedUntil string `json:"mutedUntil"`
-	Note       string `json:"note"`
-}
-
-type issueFeedbackRequest struct {
-	Kind      string         `json:"kind"`
-	SessionID string         `json:"sessionId"`
-	Note      string         `json:"note"`
-	CreatedBy string         `json:"createdBy"`
-	Metadata  map[string]any `json:"metadata"`
-}
-
-type mergeIssuesRequest struct {
-	TargetClusterKey  string   `json:"targetClusterKey"`
-	SourceClusterKeys []string `json:"sourceClusterKeys"`
-	Note              string   `json:"note"`
-	CreatedBy         string   `json:"createdBy"`
-}
-
-type splitIssueRequest struct {
-	NewClusterKey string   `json:"newClusterKey"`
-	SessionIDs    []string `json:"sessionIds"`
-	Note          string   `json:"note"`
-	CreatedBy     string   `json:"createdBy"`
-}
-
-type queueRedriveRequest struct {
-	Queue string `json:"queue"`
-	Limit int    `json:"limit"`
-}
-
-type queuePurgeRequest struct {
-	Queue string `json:"queue"`
-	Scope string `json:"scope"`
-	Limit int    `json:"limit"`
-}
-
-func (h *Handler) listProjectAPIKeys(w http.ResponseWriter, r *http.Request) {
-	projectID := chi.URLParam(r, "projectID")
-	keys, err := h.store.ListProjectAPIKeys(r.Context(), projectID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "project keys lookup failed"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
-}
-
-func (h *Handler) createProjectAPIKey(w http.ResponseWriter, r *http.Request) {
-	projectID := chi.URLParam(r, "projectID")
-	payload := createProjectAPIKeyRequest{}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
-		return
-	}
-
-	label := strings.TrimSpace(payload.Label)
-	if label == "" {
-		label = "project-key"
-	}
-
-	rawKey := generateRawAPIKey()
-	stored, err := h.store.CreateAPIKeyForProject(r.Context(), projectID, label, rawKey)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "api key creation failed"})
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"apiKeyId":  stored.ID,
-		"projectId": stored.ProjectID,
-		"label":     stored.Label,
-		"apiKey":    rawKey,
-	})
-}
-
-func (h *Handler) getQueueHealth(w http.ResponseWriter, r *http.Request) {
-	if h.queueStatsProvider == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue stats provider unavailable"})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 1200*time.Millisecond)
-	defer cancel()
-
-	stats, err := h.queueStatsProvider.QueueStats(ctx)
-	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue stats unavailable"})
-		return
-	}
-
-	warningPending := h.queueWarningPending
-	if warningPending < 1 {
-		warningPending = 5
-	}
-	warningRetry := h.queueWarningRetry
-	if warningRetry < 1 {
-		warningRetry = 1
-	}
-	criticalPending := h.queueCriticalPending
-	if criticalPending < 1 {
-		criticalPending = 50
-	}
-	criticalRetry := h.queueCriticalRetry
-	if criticalRetry < 1 {
-		criticalRetry = 10
-	}
-	criticalFailed := h.queueCriticalFailed
-	if criticalFailed < 1 {
-		criticalFailed = 1
-	}
-
-	status := "healthy"
-	if stats.ReplayFailedDepth >= int64(criticalFailed) ||
-		stats.AnalysisFailedDepth >= int64(criticalFailed) ||
-		stats.ReplayPending >= int64(criticalPending) ||
-		stats.AnalysisPending >= int64(criticalPending) ||
-		stats.ReplayRetryDepth >= int64(criticalRetry) ||
-		stats.AnalysisRetryDepth >= int64(criticalRetry) {
-		status = "critical"
-	} else if stats.ReplayPending >= int64(warningPending) ||
-		stats.AnalysisPending >= int64(warningPending) ||
-		stats.ReplayRetryDepth >= int64(warningRetry) ||
-		stats.AnalysisRetryDepth >= int64(warningRetry) {
-		status = "warning"
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":      status,
-		"generatedAt": time.Now().UTC().Format(time.RFC3339),
-		"replay": map[string]int64{
-			"streamDepth": stats.ReplayStreamDepth,
-			"pending":     stats.ReplayPending,
-			"retryDepth":  stats.ReplayRetryDepth,
-			"failedDepth": stats.ReplayFailedDepth,
-		},
-		"analysis": map[string]int64{
-			"streamDepth": stats.AnalysisStreamDepth,
-			"pending":     stats.AnalysisPending,
-			"retryDepth":  stats.AnalysisRetryDepth,
-			"failedDepth": stats.AnalysisFailedDepth,
-		},
-		"thresholds": map[string]int{
-			"warningPending":  warningPending,
-			"warningRetry":    warningRetry,
-			"criticalPending": criticalPending,
-			"criticalRetry":   criticalRetry,
-			"criticalFailed":  criticalFailed,
-		},
-	})
-}
-
-func (h *Handler) getQueueDeadLetters(w http.ResponseWriter, r *http.Request) {
-	if h.queueDeadLetterInspector == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue dead-letter inspector unavailable"})
-		return
-	}
-
-	queueKind, ok := parseDeadLetterQueueKind(r.URL.Query().Get("queue"))
-	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "queue query must be replay or analysis"})
-		return
-	}
-	scope, ok := parseDeadLetterScope(r.URL.Query().Get("scope"))
-	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope query must be failed or unprocessable"})
-		return
-	}
-
-	limit := 25
-	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
-		parsedLimit, err := strconv.Atoi(value)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be an integer"})
-			return
-		}
-		limit = parsedLimit
-	}
-	if limit < 1 {
-		limit = 1
-	}
-	if limit > 200 {
-		limit = 200
-	}
-	offset := 0
-	if value := strings.TrimSpace(r.URL.Query().Get("offset")); value != "" {
-		parsedOffset, err := strconv.Atoi(value)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "offset must be an integer"})
-			return
-		}
-		offset = parsedOffset
-	}
-	if offset < 0 {
-		offset = 0
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-	defer cancel()
-
-	result, err := h.queueDeadLetterInspector.ListDeadLetters(ctx, queueKind, scope, offset, limit)
-	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "dead-letter lookup failed"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"result":      result,
-		"generatedAt": time.Now().UTC().Format(time.RFC3339),
-	})
-}
-
-func (h *Handler) purgeQueueDeadLetters(w http.ResponseWriter, r *http.Request) {
-	if h.queueDeadLetterPurger == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue dead-letter purge unavailable"})
-		return
-	}
-
-	payload := queuePurgeRequest{}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
-		return
-	}
-
-	queueKind, ok := parseDeadLetterQueueKind(payload.Queue)
-	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "queue must be replay or analysis"})
-		return
-	}
-
-	scope, ok := parseDeadLetterScope(payload.Scope)
-	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope must be failed or unprocessable"})
-		return
-	}
-
-	limit := payload.Limit
-	if limit < 1 {
-		limit = 25
-	}
-	if limit > 500 {
-		limit = 500
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
-	defer cancel()
-
-	result, err := h.queueDeadLetterPurger.PurgeDeadLetters(ctx, queueKind, scope, limit)
-	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue dead-letter purge failed"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"result": result,
-	})
-}
-
-func (h *Handler) redriveDeadLetters(w http.ResponseWriter, r *http.Request) {
-	if h.queueRedriver == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue redrive unavailable"})
-		return
-	}
-
-	payload := queueRedriveRequest{}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
-		return
-	}
-
-	queueKind, ok := parseDeadLetterQueueKind(payload.Queue)
-	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "queue must be replay or analysis"})
-		return
-	}
-
-	limit := payload.Limit
-	if limit < 1 {
-		limit = 25
-	}
-	if limit > 500 {
-		limit = 500
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
-	defer cancel()
-
-	result, err := h.queueRedriver.RedriveDeadLetters(ctx, queueKind, limit)
-	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue redrive failed"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"result": result,
-	})
-}
-
-func parseDeadLetterQueueKind(value string) (queue.DeadLetterQueueKind, bool) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "replay":
-		return queue.DeadLetterQueueReplay, true
-	case "analysis":
-		return queue.DeadLetterQueueAnalysis, true
-	default:
-		return "", false
-	}
-}
-
-func parseDeadLetterScope(value string) (queue.DeadLetterScope, bool) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "failed":
-		return queue.DeadLetterScopeFailed, true
-	case "unprocessable":
-		return queue.DeadLetterScopeUnprocessable, true
-	default:
-		return "", false
-	}
+	ProjectID          string   `json:"projectId"`
+	SessionID          string   `json:"sessionId"`
+	Status             string   `json:"status"`
+	Symptom            string   `json:"symptom"`
+	TechnicalRootCause string   `json:"technicalRootCause"`
+	SuggestedFix       string   `json:"suggestedFix"`
+	TextSummary        string   `json:"textSummary"`
+	VisualSummary      string   `json:"visualSummary"`
+	Confidence         *float64 `json:"confidence"`
+	GeneratedAt        string   `json:"generatedAt"`
 }
 
 func (h *Handler) reportReplayResult(w http.ResponseWriter, r *http.Request) {
@@ -728,7 +289,8 @@ func (h *Handler) reportAnalysisResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.loadSession(r.Context(), projectID, sessionID); err != nil {
+	session, err := h.loadSession(r.Context(), projectID, sessionID)
+	if err != nil {
 		writeLookupError(w, err)
 		return
 	}
@@ -743,17 +305,44 @@ func (h *Handler) reportAnalysisResult(w http.ResponseWriter, r *http.Request) {
 		generatedAt = parsedTime
 	}
 
+	existing := session.ReportCard
+	status := firstNonEmpty(payload.Status, valueOrEmpty(existing, func(card *store.SessionReportCard) string {
+		return card.Status
+	}))
+	symptom := firstNonEmpty(payload.Symptom, valueOrEmpty(existing, func(card *store.SessionReportCard) string {
+		return card.Symptom
+	}))
+	technicalRootCause := firstNonEmpty(payload.TechnicalRootCause, valueOrEmpty(existing, func(card *store.SessionReportCard) string {
+		return card.TechnicalRootCause
+	}))
+	suggestedFix := firstNonEmpty(payload.SuggestedFix, valueOrEmpty(existing, func(card *store.SessionReportCard) string {
+		return card.SuggestedFix
+	}))
+	textSummary := firstNonEmpty(payload.TextSummary, valueOrEmpty(existing, func(card *store.SessionReportCard) string {
+		return card.TextSummary
+	}))
+	visualSummary := firstNonEmpty(payload.VisualSummary, valueOrEmpty(existing, func(card *store.SessionReportCard) string {
+		return card.VisualSummary
+	}))
+	confidence := 0.0
+	if existing != nil {
+		confidence = existing.Confidence
+	}
+	if payload.Confidence != nil {
+		confidence = *payload.Confidence
+	}
+
 	report, err := h.store.UpsertSessionReportCard(
 		r.Context(),
 		projectID,
 		sessionID,
-		payload.Status,
-		payload.Symptom,
-		payload.TechnicalRootCause,
-		payload.SuggestedFix,
-		payload.TextSummary,
-		payload.VisualSummary,
-		payload.Confidence,
+		status,
+		symptom,
+		technicalRootCause,
+		suggestedFix,
+		textSummary,
+		visualSummary,
+		confidence,
 		generatedAt,
 	)
 	if err != nil {
@@ -761,8 +350,24 @@ func (h *Handler) reportAnalysisResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	replayQueueError := ""
+	if report.Status == "pending" {
+		if job, ok := buildReplayJob(session); ok {
+			if err := h.replayProducer.EnqueueReplayJob(r.Context(), job); err != nil {
+				replayQueueError = err.Error()
+				h.metrics.replayQueueErrorsTotal.Add(1)
+				log.Printf("replay job enqueue failed session=%s err=%v", session.ID, err)
+			}
+		}
+	} else {
+		if _, err := h.store.PromoteClusters(r.Context(), projectID, h.clusterPromoteMinSession); err != nil {
+			log.Printf("post-analysis cluster promote failed session=%s err=%v", sessionID, err)
+		}
+	}
+
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"report": report,
+		"report":           report,
+		"replayQueueError": replayQueueError,
 	})
 	h.metrics.analysisReportsTotal.Add(1)
 }
@@ -778,6 +383,11 @@ func (h *Handler) uploadSessionEvents(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "events must be valid json"})
 		return
 	}
+	sanitizedEvents, err := sanitizeEventPayload(payload.Events)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "events payload could not be sanitized"})
+		return
+	}
 
 	sessionID := payload.SessionID
 	if strings.TrimSpace(sessionID) == "" {
@@ -789,7 +399,7 @@ func (h *Handler) uploadSessionEvents(w http.ResponseWriter, r *http.Request) {
 	objectKey := time.Now().UTC().Format("2006/01/02")
 	objectKey = "session-events/" + projectID + "/" + objectKey + "/" + siteKey + "/" + sessionID + ".json"
 
-	if err := h.artifactStore.StoreJSON(r.Context(), objectKey, payload.Events); err != nil {
+	if err := h.artifactStore.StoreJSON(r.Context(), objectKey, sanitizedEvents); err != nil {
 		if errors.Is(err, artifacts.ErrNotConfigured) {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "artifact store unavailable"})
 			return
@@ -820,13 +430,8 @@ func (h *Handler) promoteIssues(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
 	stateFilter := strings.TrimSpace(r.URL.Query().Get("state"))
-	if stateFilter != "" &&
-		stateFilter != "open" &&
-		stateFilter != "acknowledged" &&
-		stateFilter != "resolved" &&
-		stateFilter != "muted" &&
-		stateFilter != "active" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "state must be one of: open, acknowledged, resolved, muted, active"})
+	if stateFilter != "" && stateFilter != "active" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "state must be one of: active or empty"})
 		return
 	}
 
@@ -840,238 +445,6 @@ func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": clusters,
 		"state":  stateFilter,
-	})
-}
-
-func (h *Handler) updateIssueState(w http.ResponseWriter, r *http.Request) {
-	clusterKey := strings.TrimSpace(chi.URLParam(r, "clusterKey"))
-	if clusterKey == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "clusterKey is required"})
-		return
-	}
-
-	payload := updateIssueStateRequest{}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
-		return
-	}
-
-	state := strings.TrimSpace(payload.State)
-	if state == "" {
-		state = "open"
-	}
-	if state != "open" && state != "acknowledged" && state != "resolved" && state != "muted" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "state must be one of: open, acknowledged, resolved, muted"})
-		return
-	}
-
-	var mutedUntil *time.Time
-	if candidate := strings.TrimSpace(payload.MutedUntil); candidate != "" {
-		parsed, err := time.Parse(time.RFC3339, candidate)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mutedUntil must be RFC3339 timestamp"})
-			return
-		}
-		mutedUntil = &parsed
-	}
-	if state == "muted" && mutedUntil == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mutedUntil is required when state=muted"})
-		return
-	}
-
-	projectID := h.projectIDFromContext(r.Context())
-	exists, err := h.store.IssueClusterExists(r.Context(), projectID, clusterKey)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "issue lookup failed"})
-		return
-	}
-	if !exists {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "issue cluster not found"})
-		return
-	}
-
-	updated, err := h.store.UpsertIssueClusterState(
-		r.Context(),
-		projectID,
-		clusterKey,
-		state,
-		payload.Assignee,
-		mutedUntil,
-		payload.Note,
-	)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "issue state update failed"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"state": updated,
-	})
-}
-
-func (h *Handler) recordIssueFeedback(w http.ResponseWriter, r *http.Request) {
-	clusterKey := strings.TrimSpace(chi.URLParam(r, "clusterKey"))
-	if clusterKey == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "clusterKey is required"})
-		return
-	}
-
-	payload := issueFeedbackRequest{}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
-		return
-	}
-
-	projectID := h.projectIDFromContext(r.Context())
-	exists, err := h.store.IssueClusterExists(r.Context(), projectID, clusterKey)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "issue lookup failed"})
-		return
-	}
-	if !exists {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "issue cluster not found"})
-		return
-	}
-
-	event, err := h.store.RecordIssueFeedback(
-		r.Context(),
-		projectID,
-		clusterKey,
-		payload.SessionID,
-		payload.Kind,
-		payload.Note,
-		payload.Metadata,
-		payload.CreatedBy,
-	)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"feedback": event,
-	})
-}
-
-func (h *Handler) listIssueFeedback(w http.ResponseWriter, r *http.Request) {
-	clusterKey := strings.TrimSpace(chi.URLParam(r, "clusterKey"))
-	if clusterKey == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "clusterKey is required"})
-		return
-	}
-
-	limit := 30
-	if candidate := strings.TrimSpace(r.URL.Query().Get("limit")); candidate != "" {
-		parsed, err := strconv.Atoi(candidate)
-		if err != nil || parsed < 1 || parsed > 200 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be an integer between 1 and 200"})
-			return
-		}
-		limit = parsed
-	}
-
-	projectID := h.projectIDFromContext(r.Context())
-	events, err := h.store.ListIssueFeedback(r.Context(), projectID, clusterKey, limit)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "feedback lookup failed"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"clusterKey": clusterKey,
-		"limit":      limit,
-		"events":     events,
-	})
-}
-
-func (h *Handler) mergeIssues(w http.ResponseWriter, r *http.Request) {
-	payload := mergeIssuesRequest{}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
-		return
-	}
-
-	projectID := h.projectIDFromContext(r.Context())
-	result, err := h.store.MergeIssueClusters(
-		r.Context(),
-		projectID,
-		payload.TargetClusterKey,
-		payload.SourceClusterKeys,
-		h.clusterPromoteMinSession,
-	)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-
-	_, _ = h.store.RecordIssueFeedback(
-		r.Context(),
-		projectID,
-		result.TargetClusterKey,
-		"",
-		"merge",
-		payload.Note,
-		map[string]any{
-			"sourceClusterKeys": result.SourceClusterKeys,
-			"movedMarkerCount":  result.MovedMarkerCount,
-		},
-		payload.CreatedBy,
-	)
-
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"result": result,
-	})
-}
-
-func (h *Handler) splitIssue(w http.ResponseWriter, r *http.Request) {
-	sourceClusterKey := strings.TrimSpace(chi.URLParam(r, "clusterKey"))
-	if sourceClusterKey == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "clusterKey is required"})
-		return
-	}
-
-	payload := splitIssueRequest{}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
-		return
-	}
-
-	newClusterKey := strings.TrimSpace(payload.NewClusterKey)
-	if newClusterKey == "" {
-		newClusterKey = sourceClusterKey + ":split:" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	}
-
-	projectID := h.projectIDFromContext(r.Context())
-	result, err := h.store.SplitIssueCluster(
-		r.Context(),
-		projectID,
-		sourceClusterKey,
-		newClusterKey,
-		payload.SessionIDs,
-		h.clusterPromoteMinSession,
-	)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-
-	_, _ = h.store.RecordIssueFeedback(
-		r.Context(),
-		projectID,
-		sourceClusterKey,
-		"",
-		"split",
-		payload.Note,
-		map[string]any{
-			"newClusterKey":    result.NewClusterKey,
-			"sessionIds":       payload.SessionIDs,
-			"movedMarkerCount": result.MovedMarkerCount,
-		},
-		payload.CreatedBy,
-	)
-
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"result": result,
 	})
 }
 
@@ -1352,62 +725,6 @@ func findArtifactByType(artifacts []store.SessionArtifact, artifactType string) 
 	return store.SessionArtifact{}, false
 }
 
-func (h *Handler) dispatchPromotedIssueAlerts(
-	ctx context.Context,
-	clusters []store.IssueCluster,
-	trigger string,
-) (int, int) {
-	if h.alertNotifier == nil || !h.alertNotifier.enabled() || len(clusters) == 0 {
-		return 0, 0
-	}
-
-	stateCache := map[string]map[string]store.IssueCluster{}
-	sent := 0
-	errorsCount := 0
-	for _, rawCluster := range clusters {
-		cluster := rawCluster
-		projectID := strings.TrimSpace(cluster.ProjectID)
-		if projectID != "" {
-			projectStateMap, ok := stateCache[projectID]
-			if !ok {
-				resolvedClusters, err := h.store.ListIssueClusters(ctx, projectID, "")
-				if err != nil {
-					errorsCount++
-					h.metrics.alertErrorsTotal.Add(1)
-					log.Printf("issue alert state lookup failed project=%s trigger=%s err=%v", projectID, trigger, err)
-					continue
-				}
-				projectStateMap = map[string]store.IssueCluster{}
-				for _, resolved := range resolvedClusters {
-					projectStateMap[resolved.Key] = resolved
-				}
-				stateCache[projectID] = projectStateMap
-			}
-			if resolved, ok := projectStateMap[cluster.Key]; ok {
-				cluster.State = resolved.State
-				cluster.Assignee = resolved.Assignee
-				cluster.MutedUntil = resolved.MutedUntil
-				cluster.StateNote = resolved.StateNote
-				cluster.StateUpdatedAt = resolved.StateUpdatedAt
-			}
-		}
-
-		delivered, err := h.alertNotifier.notifyClusterPromoted(ctx, cluster, trigger)
-		if err != nil {
-			errorsCount++
-			h.metrics.alertErrorsTotal.Add(1)
-			log.Printf("issue alert failed project=%s cluster=%s trigger=%s err=%v", cluster.ProjectID, cluster.Key, trigger, err)
-			continue
-		}
-		if delivered {
-			sent++
-			h.metrics.alertSentTotal.Add(1)
-		}
-	}
-
-	return sent, errorsCount
-}
-
 func buildReplayJob(session store.Session) (queue.ReplayJob, bool) {
 	if session.EventsObjectKey == "" || len(session.Markers) == 0 {
 		return queue.ReplayJob{}, false
@@ -1427,6 +744,8 @@ func buildReplayJob(session store.Session) (queue.ReplayJob, bool) {
 		EventsObjectKey: session.EventsObjectKey,
 		MarkerOffsetsMs: offsets,
 		TriggerKind:     triggerKind,
+		Route:           session.Route,
+		Site:            session.Site,
 	}, true
 }
 
@@ -1600,8 +919,21 @@ func slugSite(site string) string {
 	return slug
 }
 
-func generateRawAPIKey() string {
-	return "rpk_" + strings.ReplaceAll(uuid.NewString(), "-", "") + strings.ReplaceAll(uuid.NewString(), "-", "")
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func valueOrEmpty[T any](value *T, selector func(*T) string) string {
+	if value == nil {
+		return ""
+	}
+	return selector(value)
 }
 
 func maxInt(a, b int) int {

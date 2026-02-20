@@ -3,8 +3,10 @@ import { hostname } from "node:os";
 import { Redis } from "ioredis";
 import { z } from "zod";
 import { loadConfig } from "./config.js";
-import { reportReplayArtifact } from "./orchestrator.js";
+import { reportAnalysisUpdate, reportReplayArtifact } from "./orchestrator.js";
 import { processReplayJob } from "./reconstruct.js";
+import type { AnalysisReportUpdate } from "./types.js";
+import { runVisualVerification } from "./visual.js";
 
 interface StreamMessage {
   id: string;
@@ -17,6 +19,8 @@ const replayJobSchema = z.object({
   eventsObjectKey: z.string().min(1),
   markerOffsetsMs: z.array(z.number().int().nonnegative()).min(1),
   triggerKind: z.enum(["api_error", "js_exception", "validation_failed", "ui_no_effect"]),
+  route: z.string().default("/unknown"),
+  site: z.string().default("unknown-site"),
   attempt: z.number().int().positive().default(1),
 });
 
@@ -38,6 +42,19 @@ let shuttingDown = false;
 interface RenderPolicyDecision {
   renderEnabled: boolean;
   skipReason?: string;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  if (value < 0) {
+    return 0;
+  }
+  if (value > 1) {
+    return 1;
+  }
+  return value;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -63,6 +80,8 @@ function jobFingerprint(parsed: z.infer<typeof replayJobSchema>): string {
         parsed.sessionId,
         parsed.eventsObjectKey,
         parsed.triggerKind,
+        parsed.route,
+        parsed.site,
         parsed.markerOffsetsMs.join(","),
       ].join("|"),
     )
@@ -272,6 +291,29 @@ async function rollbackReservedBudgets(counterKeys: string[]): Promise<void> {
   }
 }
 
+function buildVisualReportUpdate(
+  parsed: z.infer<typeof replayJobSchema>,
+  generatedAt: string,
+  status: AnalysisReportUpdate["status"],
+  summary: string,
+  confidence?: number,
+  symptom?: string,
+  technicalRootCause?: string,
+  suggestedFix?: string,
+): AnalysisReportUpdate {
+  return {
+    projectId: parsed.projectId,
+    sessionId: parsed.sessionId,
+    status,
+    symptom,
+    technicalRootCause,
+    suggestedFix,
+    visualSummary: summary,
+    ...(typeof confidence === "number" ? { confidence: clamp01(confidence) } : {}),
+    generatedAt,
+  };
+}
+
 async function claimRenderPolicy(projectID: string): Promise<RenderPolicyDecision> {
   if (!config.renderEnabled) {
     return {
@@ -402,6 +444,62 @@ async function handleMessage(message: StreamMessage): Promise<void> {
         generatedAt: result.generatedAt,
         windows: result.markerWindows,
       });
+    }
+    if (result.videoStatus !== "ready" || !result.videoArtifactKey) {
+      const fallbackStatus: AnalysisReportUpdate["status"] =
+        result.videoStatus === "failed" ? "failed" : "discarded";
+      const fallbackSummary =
+        result.videoStatus === "failed"
+          ? `Visual confirmation failed because replay rendering failed: ${result.videoError ?? "unknown render error"}.`
+          : `Visual confirmation skipped: ${result.videoError ?? "render policy skipped video generation"}.`;
+      await reportAnalysisUpdate(
+        config,
+        buildVisualReportUpdate(
+          parsed,
+          result.generatedAt,
+          fallbackStatus,
+          fallbackSummary,
+          0,
+        ),
+      );
+    } else {
+      try {
+        const visualVerdict = await runVisualVerification(config, parsed, result);
+        const confirmed =
+          visualVerdict.confirmed &&
+          visualVerdict.confidence >= config.visualMinConfirmConfidence;
+        const status: AnalysisReportUpdate["status"] = confirmed ? "ready" : "discarded";
+        const summary = confirmed
+          ? `${visualVerdict.summary} Visual path source: replay video model.`
+          : `${visualVerdict.summary} Discarded: visual confirmation confidence ${visualVerdict.confidence.toFixed(2)} below threshold ${config.visualMinConfirmConfidence.toFixed(2)} or confirmation was false.`;
+        await reportAnalysisUpdate(
+          config,
+          buildVisualReportUpdate(
+            parsed,
+            result.generatedAt,
+            status,
+            summary,
+            visualVerdict.confidence,
+            visualVerdict.symptom,
+            visualVerdict.technicalRootCause,
+            visualVerdict.suggestedFix,
+          ),
+        );
+      } catch (visualError) {
+        const details = visualError instanceof Error ? visualError.message : String(visualError);
+        const visualStatus: AnalysisReportUpdate["status"] =
+          details.toLowerCase().includes("not configured") ? "discarded" : "failed";
+        await reportAnalysisUpdate(
+          config,
+          buildVisualReportUpdate(
+            parsed,
+            result.generatedAt,
+            visualStatus,
+            `Visual model verification failed: ${details}`,
+            0,
+          ),
+        );
+      }
     }
     await redis.set(doneKey, result.generatedAt, "EX", Math.max(60, config.dedupeWindowSec));
     shouldAcknowledge = true;

@@ -27,6 +27,8 @@ export interface RetrospecInitOptions {
   rageClickWindowMs?: number;
   reloadLoopThreshold?: number;
   reloadLoopWindowMs?: number;
+  maskAllInputs?: boolean;
+  maskInputOptions?: Record<string, boolean>;
   debug?: boolean;
 }
 

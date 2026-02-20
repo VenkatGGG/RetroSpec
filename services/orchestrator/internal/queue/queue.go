@@ -8,6 +8,8 @@ type ReplayJob struct {
 	EventsObjectKey string `json:"eventsObjectKey"`
 	MarkerOffsetsMs []int  `json:"markerOffsetsMs"`
 	TriggerKind     string `json:"triggerKind"`
+	Route           string `json:"route"`
+	Site            string `json:"site"`
 }
 
 type AnalysisJob struct {

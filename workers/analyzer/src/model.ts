@@ -3,7 +3,7 @@ import { analyzeSession } from "./analyze.js";
 import type { AnalysisJobData, AnalysisReport } from "./types.js";
 import { z } from "zod";
 
-interface RemotePathResponse {
+interface RemoteTextResponse {
   symptom?: string;
   technicalRootCause?: string;
   suggestedFix?: string;
@@ -17,7 +17,7 @@ interface RRWebEventLike {
 
 const MAX_REMOTE_EVENTS = 180;
 const MAX_REMOTE_PAYLOAD_CHARS = 45_000;
-const MODEL_REQUEST_SCHEMA_VERSION = "retrospec.analysis.v1";
+const MODEL_REQUEST_SCHEMA_VERSION = "retrospec.analysis.text.v1";
 
 const contractText = z.preprocess((value) => {
   if (typeof value !== "string") {
@@ -26,7 +26,7 @@ const contractText = z.preprocess((value) => {
   return value.trim();
 }, z.string().min(3).max(2000));
 
-const remotePathResponseSchema = z.object({
+const remoteTextResponseSchema = z.object({
   symptom: contractText.optional(),
   technicalRootCause: contractText.optional(),
   rootCause: contractText.optional(),
@@ -36,7 +36,6 @@ const remotePathResponseSchema = z.object({
   recommendation: contractText.optional(),
   summary: contractText.optional(),
   textSummary: contractText.optional(),
-  visualSummary: contractText.optional(),
   confidence: z.number().min(0).max(1).optional(),
 }).strict();
 
@@ -133,8 +132,8 @@ function summarizeEvents(rawEvents: unknown, markerOffsetsMs: number[]): {
   };
 }
 
-function parseRemotePathResponse(raw: unknown): RemotePathResponse {
-  const parsed = remotePathResponseSchema.safeParse(raw);
+function parseRemoteTextResponse(raw: unknown): RemoteTextResponse {
+  const parsed = remoteTextResponseSchema.safeParse(raw);
   if (!parsed.success) {
     throw new Error(`remote model response does not match contract: ${parsed.error.issues.map((issue) => issue.path.join(".")).join(",")}`);
   }
@@ -152,8 +151,7 @@ function parseRemotePathResponse(raw: unknown): RemotePathResponse {
       toStringIfNonEmpty(source.recommendation),
     summary:
       toStringIfNonEmpty(source.summary) ||
-      toStringIfNonEmpty(source.textSummary) ||
-      toStringIfNonEmpty(source.visualSummary),
+      toStringIfNonEmpty(source.textSummary),
     confidence: typeof source.confidence === "number" ? clamp01(source.confidence) : undefined,
   };
 
@@ -164,16 +162,15 @@ function parseRemotePathResponse(raw: unknown): RemotePathResponse {
   return response;
 }
 
-async function postModelRequest(
+async function postTextModelRequest(
   endpoint: string,
-  mode: "text" | "visual",
   job: AnalysisJobData,
   rawEvents: unknown,
   config: AnalyzerWorkerConfig,
-): Promise<RemotePathResponse> {
+): Promise<RemoteTextResponse> {
   const trimmedEndpoint = endpoint.trim();
   if (!trimmedEndpoint) {
-    throw new Error(`${mode} model endpoint is not configured`);
+    throw new Error("text model endpoint is not configured");
   }
 
   const { eventCount, sampledPayload } = summarizeEvents(rawEvents, job.markerOffsetsMs);
@@ -197,7 +194,6 @@ async function postModelRequest(
       body: JSON.stringify({
         schemaVersion: MODEL_REQUEST_SCHEMA_VERSION,
         expectedResponseSchema: "symptom|technicalRootCause|suggestedFix|summary|confidence",
-        mode,
         projectId: job.projectId,
         sessionId: job.sessionId,
         site: job.site,
@@ -212,73 +208,68 @@ async function postModelRequest(
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`${mode} model status=${response.status} body=${body}`);
+      throw new Error(`text model status=${response.status} body=${body}`);
     }
 
     const payload = (await response.json().catch(() => ({}))) as unknown;
-    return parseRemotePathResponse(payload);
+    return parseRemoteTextResponse(payload);
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function mergeDualPathReport(
+function mergeTextPathReport(
   baseline: AnalysisReport,
-  textPath: RemotePathResponse | null,
-  visualPath: RemotePathResponse | null,
+  textPath: RemoteTextResponse,
 ): AnalysisReport {
-  const textConfidence = textPath?.confidence;
-  const visualConfidence = visualPath?.confidence;
   const confidenceValues = [
     baseline.confidence,
-    ...(typeof textConfidence === "number" ? [textConfidence] : []),
-    ...(typeof visualConfidence === "number" ? [visualConfidence] : []),
+    ...(typeof textPath.confidence === "number" ? [textPath.confidence] : []),
   ];
   const combinedConfidence =
     confidenceValues.reduce((sum, current) => sum + current, 0) /
     Math.max(1, confidenceValues.length);
 
   const textSummary = [
-    textPath?.summary || baseline.textSummary,
-    textPath ? "Text path source: remote model." : "Text path source: heuristic fallback.",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const visualSummary = [
-    visualPath?.summary || baseline.visualSummary,
-    visualPath ? "Visual path source: remote model." : "Visual path source: heuristic fallback.",
+    textPath.summary || baseline.textSummary,
+    "Text path source: remote model.",
   ]
     .filter(Boolean)
     .join(" ");
 
   return {
     ...baseline,
-    symptom: textPath?.symptom || visualPath?.symptom || baseline.symptom,
-    technicalRootCause:
-      textPath?.technicalRootCause || visualPath?.technicalRootCause || baseline.technicalRootCause,
-    suggestedFix: textPath?.suggestedFix || visualPath?.suggestedFix || baseline.suggestedFix,
+    symptom: textPath.symptom || baseline.symptom,
+    technicalRootCause: textPath.technicalRootCause || baseline.technicalRootCause,
+    suggestedFix: textPath.suggestedFix || baseline.suggestedFix,
     textSummary,
-    visualSummary,
     confidence: clamp01(combinedConfidence),
   };
 }
 
-function applyConfidenceGate(report: AnalysisReport, config: AnalyzerWorkerConfig): AnalysisReport {
+function applyTextGate(report: AnalysisReport, config: AnalyzerWorkerConfig): AnalysisReport {
+  const threshold = clamp01(config.minAcceptConfidence);
+  if (report.confidence >= threshold) {
+    return {
+      ...report,
+      status: "pending",
+      visualSummary: `${report.visualSummary} Awaiting visual confirmation from reconstructed replay video.`,
+    };
+  }
+
   if (!config.discardUncertain) {
-    return report;
-  }
-  if (report.status !== "ready") {
-    return report;
-  }
-  if (report.confidence >= config.minAcceptConfidence) {
-    return report;
+    return {
+      ...report,
+      status: "pending",
+      visualSummary: `${report.visualSummary} Forced to visual verification despite low confidence (${report.confidence.toFixed(2)}).`,
+    };
   }
 
   return {
     ...report,
     status: "discarded",
-    textSummary: `${report.textSummary} Discarded: confidence ${report.confidence.toFixed(2)} below threshold ${config.minAcceptConfidence.toFixed(2)}.`,
-    visualSummary: `${report.visualSummary} Report marked as discarded to avoid low-certainty false positives.`,
+    textSummary: `${report.textSummary} Discarded before visual stage: confidence ${report.confidence.toFixed(2)} below threshold ${threshold.toFixed(2)}.`,
+    visualSummary: `${report.visualSummary} Visual stage skipped due to low text confidence.`,
   };
 }
 
@@ -289,30 +280,23 @@ export async function generateAnalysisReport(
   config: AnalyzerWorkerConfig,
 ): Promise<AnalysisReport> {
   const baseline = analyzeSession(job, rawEvents, generatedAt);
-  if (config.provider !== "dual_http") {
-    return applyConfidenceGate(baseline, config);
+  if (config.provider !== "remote_text") {
+    return applyTextGate(baseline, config);
   }
 
-  const [textResult, visualResult] = await Promise.allSettled([
-    postModelRequest(config.textModelEndpoint, "text", job, rawEvents, config),
-    postModelRequest(config.visualModelEndpoint, "visual", job, rawEvents, config),
-  ]);
-
-  const textPath = textResult.status === "fulfilled" ? textResult.value : null;
-  const visualPath = visualResult.status === "fulfilled" ? visualResult.value : null;
-
-  if (!textPath && !visualPath) {
-    if (config.fallbackToHeuristic) {
-      return applyConfidenceGate({
+  try {
+    const textPath = await postTextModelRequest(config.textModelEndpoint, job, rawEvents, config);
+    return applyTextGate(mergeTextPathReport(baseline, textPath), config);
+  } catch (error) {
+    if (!config.fallbackToHeuristic) {
+      throw error;
+    }
+    return applyTextGate(
+      {
         ...baseline,
         textSummary: `${baseline.textSummary} Text path source: heuristic fallback (remote unavailable).`,
-        visualSummary: `${baseline.visualSummary} Visual path source: heuristic fallback (remote unavailable).`,
-      }, config);
-    }
-    const textError = textResult.status === "rejected" ? textResult.reason : "unknown";
-    const visualError = visualResult.status === "rejected" ? visualResult.reason : "unknown";
-    throw new Error(`dual_http provider failed text=${String(textError)} visual=${String(visualError)}`);
+      },
+      config,
+    );
   }
-
-  return applyConfidenceGate(mergeDualPathReport(baseline, textPath, visualPath), config);
 }

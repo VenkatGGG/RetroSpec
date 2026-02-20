@@ -20,16 +20,6 @@ type Config struct {
 	RateLimitRequestsPerSec    float64
 	RateLimitBurst             int
 	AutoCleanupIntervalMinutes int
-	AutoPromoteOnIngest        bool
-	AlertWebhookURL            string
-	AlertAuthHeader            string
-	AlertCooldownMinutes       int
-	AlertMinClusterConfidence  float64
-	QueueWarningPending        int
-	QueueWarningRetry          int
-	QueueCriticalPending       int
-	QueueCriticalRetry         int
-	QueueCriticalFailed        int
 	SessionRetentionDays       int
 	S3Region                   string
 	S3Endpoint                 string
@@ -59,16 +49,6 @@ func Load() Config {
 		RateLimitRequestsPerSec:    envOrDefaultFloat("RATE_LIMIT_REQUESTS_PER_SEC", 25),
 		RateLimitBurst:             envOrDefaultInt("RATE_LIMIT_BURST", 50),
 		AutoCleanupIntervalMinutes: envOrDefaultInt("AUTO_CLEANUP_INTERVAL_MINUTES", 0),
-		AutoPromoteOnIngest:        envOrDefaultBool("AUTO_PROMOTE_ON_INGEST", true),
-		AlertWebhookURL:            strings.TrimSpace(os.Getenv("ALERT_WEBHOOK_URL")),
-		AlertAuthHeader:            strings.TrimSpace(os.Getenv("ALERT_AUTH_HEADER")),
-		AlertCooldownMinutes:       envOrDefaultInt("ALERT_COOLDOWN_MINUTES", 60),
-		AlertMinClusterConfidence:  envOrDefaultFloat("ALERT_MIN_CLUSTER_CONFIDENCE", 0.7),
-		QueueWarningPending:        envOrDefaultInt("QUEUE_WARNING_PENDING", 5),
-		QueueWarningRetry:          envOrDefaultInt("QUEUE_WARNING_RETRY", 1),
-		QueueCriticalPending:       envOrDefaultInt("QUEUE_CRITICAL_PENDING", 50),
-		QueueCriticalRetry:         envOrDefaultInt("QUEUE_CRITICAL_RETRY", 10),
-		QueueCriticalFailed:        envOrDefaultInt("QUEUE_CRITICAL_FAILED", 1),
 		SessionRetentionDays:       envOrDefaultInt("SESSION_RETENTION_DAYS", 7),
 		S3Region:                   envOrDefault("S3_REGION", "us-east-1"),
 		S3Endpoint:                 os.Getenv("S3_ENDPOINT"),

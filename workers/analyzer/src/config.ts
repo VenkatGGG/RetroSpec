@@ -4,9 +4,8 @@ export interface AnalyzerWorkerConfig {
   queueName: string;
   orchestratorBaseUrl: string;
   internalApiKey: string;
-  provider: "heuristic" | "dual_http";
+  provider: "heuristic" | "remote_text";
   textModelEndpoint: string;
-  visualModelEndpoint: string;
   modelApiKey: string;
   modelTimeoutMs: number;
   fallbackToHeuristic: boolean;
@@ -32,7 +31,6 @@ export function loadConfig(): AnalyzerWorkerConfig {
     internalApiKey: process.env.INTERNAL_API_KEY ?? "",
     provider: parseProvider(process.env.ANALYZER_PROVIDER),
     textModelEndpoint: process.env.ANALYZER_TEXT_MODEL_ENDPOINT ?? "",
-    visualModelEndpoint: process.env.ANALYZER_VISUAL_MODEL_ENDPOINT ?? "",
     modelApiKey: process.env.ANALYZER_MODEL_API_KEY ?? "",
     modelTimeoutMs: envOrDefaultNumber("ANALYZER_MODEL_TIMEOUT_MS", 20_000),
     fallbackToHeuristic: (process.env.ANALYZER_FALLBACK_TO_HEURISTIC ?? "true").toLowerCase() !== "false",
@@ -63,9 +61,10 @@ function envOrDefaultNumber(key: string, fallback: number): number {
   return parsed;
 }
 
-function parseProvider(rawValue: string | undefined): "heuristic" | "dual_http" {
-  if ((rawValue ?? "").trim().toLowerCase() === "dual_http") {
-    return "dual_http";
+function parseProvider(rawValue: string | undefined): "heuristic" | "remote_text" {
+  const normalized = (rawValue ?? "").trim().toLowerCase();
+  if (normalized === "remote_text" || normalized === "remote" || normalized === "dual_http") {
+    return "remote_text";
   }
   return "heuristic";
 }
