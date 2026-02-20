@@ -17,6 +17,7 @@ const client = initRetrospec({
   apiBaseUrl: "http://localhost:8080",
   apiKey: "replace-if-ingest-key-enabled",
   site: "demo-shop.io",
+  maskAllInputs: true,
 });
 
 window.addEventListener("beforeunload", () => {
@@ -32,3 +33,8 @@ window.addEventListener("beforeunload", () => {
 4. Auto-flush incremental updates periodically and on `pagehide`.
 
 Use an `apiKey` value from your deployment environment (`INGEST_API_KEY`) for authenticated writes.
+
+## Privacy Defaults
+
+- Input values are masked at capture time (`maskAllInputs: true` by default).
+- Additional redaction happens server-side before rrweb payloads are stored.

@@ -21,10 +21,7 @@ psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/or
 psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/orchestrator/db/migrations/003_projects_and_project_api_keys.sql
 psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/orchestrator/db/migrations/004_session_artifacts.sql
 psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/orchestrator/db/migrations/005_session_report_cards.sql
-psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/orchestrator/db/migrations/006_issue_cluster_states.sql
-psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/orchestrator/db/migrations/007_issue_alert_events.sql
 psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/orchestrator/db/migrations/008_error_markers_evidence.sql
-psql postgresql://retrospec:retrospec@localhost:5432/retrospec -f ../services/orchestrator/db/migrations/009_issue_feedback_and_cluster_ops.sql
 ```
 
 ## Stop
